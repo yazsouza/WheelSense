@@ -3,17 +3,17 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:http/http.dart' as http;
 
+// Data models for the UI
 class ManeuverStep {
   final String text;
-  final String? imagePath; // Path to your local asset image
+  final String? imagePath;
   ManeuverStep({required this.text, this.imagePath});
 }
 
 class Maneuver {
   final String name;
-  final List<ManeuverStep> steps; // Grouped steps from the guide
+  final List<ManeuverStep> steps;
   final bool isPivot;
-
   Maneuver({required this.name, required this.steps, this.isPivot = false});
 }
 
@@ -34,15 +34,17 @@ class WheelData {
     required this.rpmDiff, required this.motion, this.isSimulated = false,
   });
 
-  static double _toDouble(dynamic v) => (v is num) ? v.toDouble() : double.tryParse(v.toString()) ?? 0.0;
+  // Bulletproof parser: handles strings, ints, or doubles from the ESP32
+  static double _parse(dynamic v) => double.tryParse(v.toString()) ?? 0.0;
 
   factory WheelData.fromJson(Map<String, dynamic> j) {
     return WheelData(
-      rpmR: _toDouble(j['rpmR']),
-      rpmL: _toDouble(j['rpmL']),
-      speedMS: _toDouble(j['speed_m_s']),
-      rpmDiff: _toDouble(j['rpm_diff']),
+      rpmR: _parse(j['rpmR']),
+      rpmL: _parse(j['rpmL']),
+      speedMS: _parse(j['speed_m_s']),
+      rpmDiff: _parse(j['rpm_diff']),
       motion: (j['motion'] ?? 'Stopped').toString(),
+      isSimulated: false,
     );
   }
 
@@ -66,7 +68,6 @@ class Esp32Service {
   final StreamController<WheelData> _controller = StreamController<WheelData>.broadcast();
   Stream<WheelData> get stream => _controller.stream;
   Timer? _timer;
-  int _failCount = 0;
 
   void start() {
     _timer?.cancel();
@@ -77,15 +78,24 @@ class Esp32Service {
     try {
       final res = await http.get(Uri.parse('$baseUrl/data')).timeout(const Duration(milliseconds: 800));
       if (res.statusCode == 200) {
-        _failCount = 0;
+        // DEBUG PRINT: This will show the raw data in your VS Code terminal
+        print("RAW DATA FROM ESP32: ${res.body}"); 
+        
         _controller.add(WheelData.fromJson(jsonDecode(res.body)));
-      } else { _handleFailure(); }
-    } catch (_) { _handleFailure(); }
+      } else { 
+        _sendZeroData("Server Error ${res.statusCode}"); 
+      }
+    } catch (e) { 
+      _sendZeroData("Disconnected"); 
+      print("Connection Error: $e"); 
+    }
   }
 
-  void _handleFailure() {
-    _failCount++;
-    if (_failCount >= 3) _controller.add(WheelData.mock(moving: true));
+  void _sendZeroData(String status) {
+    _controller.add(WheelData(
+      rpmL: 0.0, rpmR: 0.0, rpmDiff: 0.0, speedMS: 0.0, 
+      motion: status, isSimulated: false
+    ));
   }
 
   void dispose() { _timer?.cancel(); _controller.close(); }

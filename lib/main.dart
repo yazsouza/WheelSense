@@ -101,20 +101,22 @@ class _ProDashboardState extends State<ProDashboard> {
   int? lastScore;
   List<WheelData> sessionData = [];
 
+  // UPDATED: Maneuvers based on Manual Wheelchair Skills Guide
   final List<Maneuver> maneuvers = [
     Maneuver(
       name: "Straight Line", 
       steps: [
-        ManeuverStep(text: "Lean slightly forward for stability.", imagePath: "assets/images/wheeling_forward.png"),
-        ManeuverStep(text: "Use long, smooth strokes on the handrims."),
-        ManeuverStep(text: "Look 5 meters ahead to stay straight."),
+        ManeuverStep(text: "Lean slightly forward to increase stability.", imagePath: "assets/images/wheeling_forward.png"),
+        ManeuverStep(text: "Use long, smooth strokes between 11 and 2 o'clock."),
+        ManeuverStep(text: "Keep your head up and look 5 meters ahead."),
       ]
     ),
     Maneuver(
       name: "360° Pivot", 
       isPivot: true,
       steps: [
-        ManeuverStep(text: "Pull one handrim back while pushing the other forward.", imagePath: "assets/images/wheeling_on_spot.png"),
+        ManeuverStep(text: "Push one wheel forward while pulling the other backward.", imagePath: "assets/images/wheeling_on_spot.png"),
+        ManeuverStep(text: "Move hands at the same time in opposite directions."),
         ManeuverStep(text: "Keep the wheelchair within its own length."),
       ]
     ),
@@ -126,7 +128,7 @@ class _ProDashboardState extends State<ProDashboard> {
   void startSequence() {
     setState(() { countdown = 3; lastScore = null; });
     Timer.periodic(const Duration(seconds: 1), (t) {
-      if (countdown > 1) setState(() => countdown--);
+      if (countdown > 1) {setState(() => countdown--);}
       else { t.cancel(); runTest(); }
     });
   }
@@ -134,20 +136,25 @@ class _ProDashboardState extends State<ProDashboard> {
   void runTest() {
     setState(() { countdown = 0; isTesting = true; timerLeft = widget.duration; sessionData.clear(); });
     Timer.periodic(const Duration(seconds: 1), (t) {
-      if (timerLeft > 1) setState(() => timerLeft--);
+      if (timerLeft > 1) {setState(() => timerLeft--);}
       else { t.cancel(); finishTest(); }
     });
   }
 
+  // UPDATED SCORING LOGIC
   void finishTest() {
     double scoreValue = 0;
     if (sessionData.isNotEmpty) {
       if (selectedManeuver!.isPivot) {
-        double symmetry = sessionData.map((d) => (d.rpmL - d.rpmR).abs()).reduce((a, b) => a + b) / sessionData.length;
-        scoreValue = (100 - (symmetry * 4)).clamp(0, 100);
+        // PIVOT SCORING: Guide says hands move in opposite directions.
+        // If RPM_L is 20 and RPM_R is -20, the sum is 0. 
+        // Lower sum = Better "Turning on the Spot" score.
+        double avgOppositeSymmetry = sessionData.map((d) => (d.rpmL + d.rpmR).abs()).reduce((a, b) => a + b) / sessionData.length;
+        scoreValue = (100 - (avgOppositeSymmetry * 5)).clamp(0, 100);
       } else {
-        double drift = sessionData.map((d) => d.rpmDiff).reduce((a, b) => a + b) / sessionData.length;
-        scoreValue = (100 - (drift * 6)).clamp(0, 100);
+        // STRAIGHT LINE: Reward minimal difference (drift) between wheels[cite: 417].
+        double avgDrift = sessionData.map((d) => d.rpmDiff).reduce((a, b) => a + b) / sessionData.length;
+        scoreValue = (100 - (avgDrift * 6)).clamp(0, 100);
       }
     }
     widget.onResult(SessionResult(selectedManeuver!.name, scoreValue.toInt(), DateTime.now()));
@@ -159,7 +166,8 @@ class _ProDashboardState extends State<ProDashboard> {
     return StreamBuilder<WheelData>(
       stream: esp.stream,
       builder: (context, snapshot) {
-        final d = (widget.forceMock) ? WheelData.mock(moving: isTesting) : (snapshot.data ?? WheelData.mock());
+        // If forceMock is ON, use simulation. Otherwise, use hardware if available.
+        final d = (widget.forceMock) ? WheelData.mock(moving: isTesting) : (snapshot.data ?? WheelData.mock(moving: false));
         if (isTesting) sessionData.add(d);
 
         return SafeArea(
@@ -235,6 +243,7 @@ class _ProDashboardState extends State<ProDashboard> {
     ],
   );
 
+  // UPDATED: Primary visual at top, text below
   Widget _buildInstructions() {
     final primaryStep = selectedManeuver!.steps.firstWhere((s) => s.imagePath != null, orElse: () => selectedManeuver!.steps.first);
 
@@ -248,7 +257,7 @@ class _ProDashboardState extends State<ProDashboard> {
             Padding(
               padding: const EdgeInsets.only(bottom: 20),
               child: AspectRatio(
-                aspectRatio: 16 / 9,
+                aspectRatio: 16 / 9, // Prevents cropping on resize
                 child: Image.asset(primaryStep.imagePath!, fit: BoxFit.contain),
               ),
             ),
@@ -283,7 +292,7 @@ class ProgressScreen extends StatelessWidget {
             itemBuilder: (context, index) {
               final res = history[index];
               return ListTile(
-                leading: CircleAvatar(backgroundColor: Colors.blue.shade900, child: Text("${res.score}", style: const TextStyle(color: Colors.white))),
+                leading: CircleAvatar(backgroundColor: Colors.blue.shade900, child: Text("${res.score}", style: const TextStyle(color: Colors.white, fontSize: 14))),
                 title: Text(res.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                 subtitle: Text(DateFormat('MMM d, yyyy • HH:mm').format(res.date)),
               );

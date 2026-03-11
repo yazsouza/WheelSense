@@ -1,38 +1,5 @@
-import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-
-// ===================== Data Models =====================
-
-class ManeuverStep {
-  final String text;
-  final String? imagePath;
-
-  ManeuverStep({
-    required this.text,
-    this.imagePath,
-  });
-}
-
-class Maneuver {
-  final String name;
-  final List<ManeuverStep> steps;
-  final bool isPivot;
-
-  Maneuver({
-    required this.name,
-    required this.steps,
-    this.isPivot = false,
-  });
-}
-
-class SessionResult {
-  final String name;
-  final int score;
-  final DateTime date;
-
-  SessionResult(this.name, this.score, this.date);
-}
 
 class WheelData {
   final double rpmR;
@@ -45,6 +12,15 @@ class WheelData {
   final String dirR;
   final String dirL;
 
+  final double pitchDeg;
+  final String slopeText;
+  final double yawRateDps;
+  final double yawDeg;
+  final String imuTurnDirection;
+  final String imuTurnState;
+  final String imuHeadingText;
+  final String imuMotionState;
+
   const WheelData({
     required this.rpmR,
     required this.rpmL,
@@ -55,106 +31,83 @@ class WheelData {
     required this.motion,
     required this.dirR,
     required this.dirL,
+    required this.pitchDeg,
+    required this.slopeText,
+    required this.yawRateDps,
+    required this.yawDeg,
+    required this.imuTurnDirection,
+    required this.imuTurnState,
+    required this.imuHeadingText,
+    required this.imuMotionState,
   });
 
-  static double _parse(dynamic v) => double.tryParse(v.toString()) ?? 0.0;
+  factory WheelData.fromJson(Map<String, dynamic> json) {
+    double parseNum(dynamic v) {
+      if (v is num) return v.toDouble();
+      return double.tryParse(v.toString()) ?? 0.0;
+    }
 
-  factory WheelData.fromJson(Map<String, dynamic> j) {
+    String parseStr(dynamic v) => v?.toString() ?? '';
+
     return WheelData(
-      rpmR: _parse(j['rpmR']),
-      rpmL: _parse(j['rpmL']),
-      signedR: _parse(j['signedR']),
-      signedL: _parse(j['signedL']),
-      speedMS: _parse(j['speed_m_s']),
-      rpmDiff: _parse(j['rpm_diff']),
-      motion: (j['motion'] ?? 'Stopped').toString(),
-      dirR: (j['dirR'] ?? 'Stopped').toString(),
-      dirL: (j['dirL'] ?? 'Stopped').toString(),
+      rpmR: parseNum(json['rpmR']),
+      rpmL: parseNum(json['rpmL']),
+      signedR: parseNum(json['signedR']),
+      signedL: parseNum(json['signedL']),
+      speedMS: parseNum(json['speed_m_s']),
+      rpmDiff: parseNum(json['rpm_diff']),
+      motion: parseStr(json['motion']),
+      dirR: parseStr(json['dirR']),
+      dirL: parseStr(json['dirL']),
+      pitchDeg: parseNum(json['pitch_deg']),
+      slopeText: parseStr(json['slope_text']),
+      yawRateDps: parseNum(json['yaw_rate_dps']),
+      yawDeg: parseNum(json['yaw_deg']),
+      imuTurnDirection: parseStr(json['imu_turn_direction']),
+      imuTurnState: parseStr(json['imu_turn_state']),
+      imuHeadingText: parseStr(json['imu_heading_text']),
+      imuMotionState: parseStr(json['imu_motion_state']),
     );
   }
 
-  static const WheelData empty = WheelData(
-    rpmR: 0,
-    rpmL: 0,
-    signedR: 0,
-    signedL: 0,
-    speedMS: 0,
-    rpmDiff: 0,
-    motion: "Waiting...",
-    dirR: "Stopped",
-    dirL: "Stopped",
-  );
+  factory WheelData.empty() {
+    return const WheelData(
+      rpmR: 0,
+      rpmL: 0,
+      signedR: 0,
+      signedL: 0,
+      speedMS: 0,
+      rpmDiff: 0,
+      motion: 'Stopped',
+      dirR: 'Stopped',
+      dirL: 'Stopped',
+      pitchDeg: 0,
+      slopeText: 'Level ground',
+      yawRateDps: 0,
+      yawDeg: 0,
+      imuTurnDirection: 'Straight',
+      imuTurnState: 'Not Turning',
+      imuHeadingText: 'Centered / near start heading',
+      imuMotionState: 'No Turning Detected',
+    );
+  }
 }
-
-// ===================== ESP32 Service =====================
 
 class Esp32Service {
   final String baseUrl;
 
-  // For real phone on ESP32 Wi-Fi, use:
-  // Esp32Service({this.baseUrl = 'http://192.168.4.1'});
+  const Esp32Service({required this.baseUrl});
 
-  // For Android emulator using your PC proxy, use:
-  Esp32Service({this.baseUrl = 'http://10.0.2.2:8080'});
+  Future<WheelData> fetchWheelData() async {
+    final response = await http
+        .get(Uri.parse('$baseUrl/data'))
+        .timeout(const Duration(seconds: 2));
 
-  final StreamController<WheelData> _controller =
-      StreamController<WheelData>.broadcast();
-
-  Stream<WheelData> get stream => _controller.stream;
-
-  Timer? _timer;
-  bool _isPolling = false;
-
-  void start() {
-    _timer?.cancel();
-    _timer = Timer.periodic(
-      const Duration(milliseconds: 700),
-      (_) => _poll(),
-    );
-  }
-
-  Future<void> _poll() async {
-    if (_isPolling) return;
-    _isPolling = true;
-
-    try {
-      final res = await http
-          .get(Uri.parse('$baseUrl/data'))
-          .timeout(const Duration(seconds: 2));
-
-      if (res.statusCode == 200) {
-        print("RAW DATA FROM ESP32: ${res.body}");
-        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-        _controller.add(WheelData.fromJson(decoded));
-      } else {
-        _sendZeroData("Server Error ${res.statusCode}");
-      }
-    } catch (e) {
-      print("Connection Error: $e");
-      _sendZeroData("Disconnected");
-    } finally {
-      _isPolling = false;
+    if (response.statusCode != 200) {
+      throw Exception('ESP32 returned status ${response.statusCode}');
     }
-  }
 
-  void _sendZeroData(String status) {
-    _controller.add(
-      WheelData(
-        rpmR: 0,
-        rpmL: 0,
-        signedR: 0,
-        signedL: 0,
-        speedMS: 0,
-        rpmDiff: 0,
-        motion: status,
-        dirR: "Stopped",
-        dirL: "Stopped",
-      ),
-    );
-  }
-
-  void dispose() {
-    _timer?.cancel();
-    _controller.close();
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    return WheelData.fromJson(decoded);
   }
 }

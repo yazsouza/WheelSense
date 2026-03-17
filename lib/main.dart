@@ -341,7 +341,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       children: [
         if (selectedManeuver != null) ...[
           Card(
-            color: isCountingDown ? Colors.amber.shade100 : Colors.indigo.shade50,
+            color: isCountingDown ? const Color.fromARGB(255, 122, 136, 229) : Colors.indigo.shade50,
             child: Padding(
               padding: const EdgeInsets.all(24),
               child: Column(
@@ -349,7 +349,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   Text(selectedManeuver!.name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 20),
                   if (isCountingDown) ...[
-                    const Text('GET READY...', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.amber)),
+                    const Text('GET READY...', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
                     Text('$countdownValue', style: const TextStyle(fontSize: 72, fontWeight: FontWeight.w900)),
                   ] else ...[
                     const Text('SENSING ACTIVE', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.indigo)),

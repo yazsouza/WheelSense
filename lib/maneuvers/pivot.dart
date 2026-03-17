@@ -9,6 +9,7 @@ final pivotManeuver = Maneuver(
     ManeuverStep(
       title: 'Get Ready',
       text: 'One hand on handrim at 1 o’clock and other backward on handrim at 11 o’clock. Decide if you are turning Clockwise or Counter-Clockwise.',
+      imagePath: 'assets/images/wheeling_on_spot.png', // ADDED IMAGE HERE
     ),
     ManeuverStep(
       title: 'Push & Pull',
@@ -18,6 +19,7 @@ final pivotManeuver = Maneuver(
     ManeuverStep(
       title: 'Repeat & Evaluate',
       text: 'Repeat, as needed, until you have turned all the way around (180 degrees).\n\nEvaluation Criteria: Maintain a steady rotation rhythm, stay in the exact same footprint without drifting away, and complete a full 180° turn.',
+      imagePath: 'assets/images/wheeling_on_spot.png', // ADDED IMAGE HERE
     ),
   ],
   evaluator: (List<WheelData> pool) {

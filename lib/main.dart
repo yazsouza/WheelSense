@@ -907,7 +907,7 @@ class _InteractiveManeuverCardState extends State<_InteractiveManeuverCard> {
                         step.imagePath!,
                         height: 180,
                         width: double.infinity,
-                        fit: BoxFit.cover,
+                        fit: BoxFit.contain,
                         errorBuilder: (context, error, stackTrace) => Container(
                           height: 180,
                           color: Colors.grey.shade200,

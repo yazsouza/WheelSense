@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart'; // REQUIRED FOR debugPrint
+import 'package:flutter/foundation.dart';
 
 import 'esp32_service.dart';
 import 'models.dart';
-import 'maneuvers/all_maneuvers.dart'; // Imports your isolated maneuvers list
+import 'maneuvers/all_maneuvers.dart';
+import 'widgets/live_overview_section.dart';
 
 enum HistoryTimeframe { today, week, month, allTime }
 
@@ -26,7 +27,9 @@ class WheelPrettyApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFFF6F7FB),
         cardTheme: CardThemeData(
           elevation: 1.5,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
         ),
       ),
       home: const DashboardScreen(),
@@ -256,6 +259,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   String _formatSummaryDuration(Duration d) {
+    if (d.inSeconds < 60) {
+      return '${d.inSeconds}s';
+    }
+
     final totalMinutes = d.inMinutes;
     final hours = totalMinutes ~/ 60;
     final minutes = totalMinutes % 60;
@@ -267,6 +274,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
       return '${hours}h';
     }
     return '${minutes}m';
+  }
+
+  int _getTotalPracticeSessions() {
+    return sessionHistory.length;
+  }
+
+  int _getAverageScore() {
+    if (sessionHistory.isEmpty) return 0;
+    final total = sessionHistory.fold<int>(0, (sum, s) => sum + s.score);
+    return (total / sessionHistory.length).round();
+  }
+
+  int _getManeuversPracticedCount() {
+    final practiced = sessionHistory.map((s) => s.name).toSet();
+    return practiced.length;
   }
 
   void _exportHistoryToConsole() {
@@ -381,8 +403,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      _buildTrainingPage(),
       _buildHomePage(),
+      _buildTrainingPage(),
       _buildHistoryPage(),
       _buildSettingsPage(),
     ];
@@ -400,14 +422,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         onDestinationSelected: (v) => setState(() => _currentIndex = v),
         destinations: const [
           NavigationDestination(
-            icon: Icon(Icons.play_circle_outline),
-            selectedIcon: Icon(Icons.play_circle),
-            label: 'Testing',
-          ),
-          NavigationDestination(
             icon: Icon(Icons.dashboard_outlined),
             selectedIcon: Icon(Icons.dashboard),
             label: 'Live',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.play_circle_outline),
+            selectedIcon: Icon(Icons.play_circle),
+            label: 'Testing',
           ),
           NavigationDestination(
             icon: Icon(Icons.history_outlined),
@@ -425,6 +447,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildHomePage() {
+    final totalSessions = _getTotalPracticeSessions();
+    final averageScore = _getAverageScore();
+    final maneuversPracticed = _getManeuversPracticedCount();
+    final totalManeuvers = maneuvers.length;
+
     return RefreshIndicator(
       onRefresh: _fetchData,
       child: ListView(
@@ -441,6 +468,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               subtitle: Text(baseUrl),
             ),
+          ),
+          const SizedBox(height: 16),
+          LiveOverviewSection(
+            totalSessions: totalSessions,
+            averageScore: averageScore,
+            maneuversPracticed: maneuversPracticed,
+            totalManeuvers: totalManeuvers,
           ),
           const SizedBox(height: 16),
           Card(

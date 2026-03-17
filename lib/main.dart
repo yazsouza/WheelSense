@@ -1,58 +1,13 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-// If you put esp32_service.dart in a different folder, update this import
+import 'package:flutter/foundation.dart'; // REQUIRED FOR debugPrint
+
 import 'esp32_service.dart';
+import 'models.dart';
+import 'maneuvers/all_maneuvers.dart'; // Imports your isolated maneuvers list
 
 void main() {
   runApp(const WheelPrettyApp());
-}
-
-enum ManeuverType { forward, backward, turnLeft, turnRight, pivot }
-
-class ManeuverStep {
-  final String title;
-  final String text;
-  final String? imagePath;
-
-  ManeuverStep({
-    required this.title,
-    required this.text,
-    this.imagePath,
-  });
-}
-
-class Maneuver {
-  final String name;
-  final List<ManeuverStep> steps;
-  final ManeuverType type;
-
-  Maneuver({
-    required this.name,
-    required this.steps,
-    required this.type,
-  });
-}
-
-class SessionResult {
-  final String name;
-  final int score;
-  final DateTime date;
-  final Duration duration;
-  final List<String> feedback;
-
-  SessionResult({
-    required this.name,
-    required this.score,
-    required this.date,
-    required this.duration,
-    required this.feedback,
-  });
-}
-
-class TestEvaluation {
-  final int score;
-  final List<String> feedback;
-  TestEvaluation(this.score, this.feedback);
 }
 
 class WheelPrettyApp extends StatelessWidget {
@@ -69,9 +24,7 @@ class WheelPrettyApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFFF6F7FB),
         cardTheme: CardThemeData(
           elevation: 1.5,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         ),
       ),
       home: const DashboardScreen(),
@@ -89,21 +42,18 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   late Esp32Service esp;
 
-  int _currentIndex = 0; // 0 is Testing, 1 is Live Data
+  int _currentIndex = 0;
 
-  // Settings
   bool demoMode = false;
   String baseUrl = 'http://192.168.4.1';
   int pollingMs = 300;
   int testDurationSetting = 10; 
 
-  // Connection State
   bool connected = false;
   bool loading = true;
   WheelData wheelData = WheelData.empty();
   Timer? _pollTimer;
 
-  // Session State
   Timer? _sessionTimer;
   Timer? _countdownTimer;
   Duration sessionElapsed = Duration.zero;
@@ -115,79 +65,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Maneuver? selectedManeuver;
   final List<SessionResult> sessionHistory = [];
 
-  // Configured Maneuvers with the new Tutorial UI Data
-  final maneuvers = [
-    Maneuver(
-      name: 'Forward Straight Line',
-      type: ManeuverType.forward,
-      steps: [
-        ManeuverStep(
-          title: 'Push',
-          text: 'Hands in starting position on handrims at 11 o\'clock. Push hands forward evenly.',
-          imagePath: 'assets/images/wheeling_forward1.png',
-        ),
-        ManeuverStep(
-          title: 'Release',
-          text: 'Release hands at 2 o\'clock. Return hands to starting position (based on chosen stroke pattern).',
-          imagePath: 'assets/images/wheeling_forward2.png',
-        ),
-        ManeuverStep(
-          title: 'Stop',
-          text: 'Gently grip handrim at 1 o\'clock.',
-          imagePath: 'assets/images/wheeling_forward3.png',
-        ),
-ManeuverStep(
-          title: 'Repeat & Evaluate',
-          text: 'Repeat the stroke pattern.\n\nEvaluation Criteria: Maintain a steady cruising speed (excluding the initial push and final stop) and track a perfectly straight trajectory without veering left or right.',
-        ),
-      ],
-    ),
-    Maneuver(
-      name: 'Backward Straight Line',
-      type: ManeuverType.backward,
-      steps: [
-        ManeuverStep(
-          title: 'Get ready',
-          text: 'Grasp handrim at 1 o\'clock.',
-          imagePath: 'assets/images/wheeling_backward1.png',
-        ),
-        ManeuverStep(
-          title: 'Shoulder check',
-          text: 'Scan for obstacles in both directions.',
-          imagePath: 'assets/images/wheeling_backward2.png',
-        ),
-        ManeuverStep(
-          title: 'Pull rear wheels back evenly',
-          text: 'Use short strokes and repeat.\n\nEvaluation Criteria: Maintain a consistent backward speed (ignoring the start-up and slow-down phases) and hold a straight line without drifting off-course.',
-          imagePath: 'assets/images/wheeling_backward3.png',
-        ),
-      ],
-    ),
-    Maneuver(
-      name: 'Turning Left',
-      type: ManeuverType.turnLeft,
-      steps: [
-        ManeuverStep(title: 'Asymmetrical Push', text: 'Push harder on the right wheel.'),
-        ManeuverStep(title: 'Follow Through', text: 'Maintain forward momentum while curving left.'),
-      ],
-    ),
-    Maneuver(
-      name: 'Turning Right',
-      type: ManeuverType.turnRight,
-      steps: [
-        ManeuverStep(title: 'Asymmetrical Push', text: 'Push harder on the left wheel.'),
-        ManeuverStep(title: 'Follow Through', text: 'Maintain forward momentum while curving right.'),
-      ],
-    ),
-    Maneuver(
-      name: 'Turning on the Spot (Pivot)',
-      type: ManeuverType.pivot,
-      steps: [
-        ManeuverStep(title: 'Opposite Forces', text: 'Push forward on one wheel while pulling backward on the other.'),
-        ManeuverStep(title: 'Center Axis', text: 'Keep the wheelchair centered in its starting footprint.'),
-      ],
-    ),
-  ];
+  // We load the maneuvers from our new clean file!
+  final maneuvers = appManeuvers; 
 
   @override
   void initState() {
@@ -207,10 +86,7 @@ ManeuverStep(
   void _startPolling() {
     _pollTimer?.cancel();
     _fetchData();
-    _pollTimer = Timer.periodic(
-      Duration(milliseconds: pollingMs),
-      (_) => _fetchData(),
-    );
+    _pollTimer = Timer.periodic(Duration(milliseconds: pollingMs), (_) => _fetchData());
   }
 
   Future<void> _fetchData() async {
@@ -237,14 +113,10 @@ ManeuverStep(
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() {
-        connected = false;
-        loading = false;
-      });
+      setState(() { connected = false; loading = false; });
     }
   }
 
-  // --- WORKFLOW CONTROL ---
   void _initiateTest(Maneuver maneuver) {
     setState(() {
       selectedManeuver = maneuver;
@@ -288,7 +160,8 @@ ManeuverStep(
     _sessionTimer?.cancel();
 
     if (selectedManeuver != null) {
-      final evaluation = _calculateSessionScore();
+      // THE MAGIC: It calls the specific scoring function from your maneuver file!
+      final evaluation = selectedManeuver!.evaluator(_sessionDataPool);
       
       final result = SessionResult(
         name: selectedManeuver!.name,
@@ -322,141 +195,30 @@ ManeuverStep(
     });
   }
 
-  // --- ANALYTICS & SCORING ENGINE ---
-  TestEvaluation _calculateSessionScore() {
-    if (_sessionDataPool.isEmpty) return TestEvaluation(0, ['No data recorded from ESP32.']);
-
-    double score = 100.0;
-    List<String> feedback = [];
-    
-    double avgSpeed = _sessionDataPool.map((d) => d.speedMS).reduce((a, b) => a + b) / _sessionDataPool.length;
-    double avgYawRate = _sessionDataPool.map((d) => d.yawRateDps).reduce((a, b) => a + b) / _sessionDataPool.length;
-    double avgAbsYawRate = _sessionDataPool.map((d) => d.yawRateDps.abs()).reduce((a, b) => a + b) / _sessionDataPool.length;
-
-    if (avgSpeed < 0.05 && selectedManeuver?.type != ManeuverType.pivot) {
-      return TestEvaluation(20, ['Minimal movement detected. Push harder to reach a measurable speed.']);
-    }
-
-    switch (selectedManeuver!.type) {
-      case ManeuverType.forward:
-      case ManeuverType.backward:
-        // 1. DRIFT ANALYSIS
-        if (avgAbsYawRate > 2.0) { 
-          score -= (avgAbsYawRate * 2.5); 
-          
-          if (avgYawRate > 1.5) {
-            feedback.add('Drifted left by an average of ${avgAbsYawRate.toStringAsFixed(1)} deg/s. Push slightly harder on your left wheel.');
-          } else if (avgYawRate < -1.5) {
-            feedback.add('Drifted right by an average of ${avgAbsYawRate.toStringAsFixed(1)} deg/s. Push slightly harder on your right wheel.');
-          } else {
-            feedback.add('Wobbled back and forth (avg ${avgAbsYawRate.toStringAsFixed(1)} deg/s deviation). Try to keep your pushes symmetrical.');
-          }
-        } else {
-          feedback.add('Excellent directional control. No significant drift detected.');
-        }
-
-        // 2. WRONG DIRECTION PENALTY (WITH DEADBAND FIX)
-        int wrongWayCount = 0;
-        double deadbandRpm = 2.0; 
-        
-        if (selectedManeuver!.type == ManeuverType.forward) {
-          wrongWayCount = _sessionDataPool.where((d) => d.signedR < -deadbandRpm || d.signedL < -deadbandRpm).length;
-        } else {
-          wrongWayCount = _sessionDataPool.where((d) => d.signedR > deadbandRpm || d.signedL > deadbandRpm).length;
-        }
-        
-        if (wrongWayCount > (_sessionDataPool.length * 0.15)) {
-          score -= 20;
-          feedback.add('Detected movement in the opposite direction. Try to minimize rolling the wrong way between pushes.');
-        }
-
-        // 3. CONSTANT SPEED ANALYSIS
-        int startIdx = (_sessionDataPool.length * 0.2).floor(); 
-        int endIdx = (_sessionDataPool.length * 0.8).floor();   
-        
-        if (endIdx > startIdx) {
-          var midPool = _sessionDataPool.sublist(startIdx, endIdx);
-          double midAvgSpeed = midPool.map((d) => d.speedMS).reduce((a, b) => a + b) / midPool.length;
-          
-          double totalDeviation = 0.0;
-          for (var d in midPool) {
-            totalDeviation += (d.speedMS - midAvgSpeed).abs();
-          }
-          double avgDeviation = totalDeviation / midPool.length;
-
-          if (avgDeviation > 0.08) {
-            score -= (avgDeviation * 80); 
-            feedback.add('Cruising speed varied (±${avgDeviation.toStringAsFixed(2)} m/s average deviation). Focus on smooth, continuous follow-through.');
-          } else {
-            feedback.add('Great job maintaining a steady cruising speed of ${midAvgSpeed.toStringAsFixed(2)} m/s.');
-          }
-        }
-        break;
-
-      case ManeuverType.turnLeft:
-      case ManeuverType.turnRight:
-        if (selectedManeuver!.type == ManeuverType.turnLeft) {
-          if (avgYawRate <= 1.0) {
-            score -= 40;
-            feedback.add('Did not detect a sufficient left turn. Push harder on the right wheel.');
-          } else {
-            feedback.add('Good left turn rotation detected (${avgYawRate.toStringAsFixed(1)} deg/s).');
-          }
-        } else {
-          if (avgYawRate >= -1.0) {
-            score -= 40;
-            feedback.add('Did not detect a sufficient right turn. Push harder on the left wheel.');
-          } else {
-             feedback.add('Good right turn rotation detected (${avgYawRate.abs().toStringAsFixed(1)} deg/s).');
-          }
-        }
-        break;
-
-      case ManeuverType.pivot:
-        double avgSymmetryError = _sessionDataPool.map((d) => (d.signedL + d.signedR).abs()).reduce((a, b) => a + b) / _sessionDataPool.length;
-        score -= (avgSymmetryError * 5.0);
-        
-        if (avgSymmetryError > 3.0) {
-           feedback.add('Uneven wheel rotation. Ensure one wheel pulls back at the exact speed the other pushes forward.');
-        } else {
-           feedback.add('Excellent symmetry. You pivoted perfectly on the center axis.');
-        }
-
-        if (avgYawRate.abs() < 5.0) {
-          score -= 30;
-          feedback.add('Low rotation speed detected. Try applying more force to the wheels to complete the pivot.');
-        }
-        break;
-    }
-
-    return TestEvaluation(score.clamp(0, 100).round(), feedback);
-  }
-
-  // --- EXPORT TO CSV (CONSOLE) ---
+  // --- CSV FIX WITH debugPrint ---
   void _exportHistoryToConsole() {
     if (sessionHistory.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No data to export!')));
       return;
     }
 
-    print("\n\n========== CAPSTONE CSV EXPORT ==========");
-    print("Date,Time,Test Name,Duration(s),Score,Primary Feedback");
+    debugPrint("\n\n========== CAPSTONE CSV EXPORT ==========");
+    debugPrint("Date,Time,Test Name,Duration(s),Score,Primary Feedback");
     
     for (var trip in sessionHistory) {
       String dateStr = '${trip.date.year}-${trip.date.month.toString().padLeft(2,'0')}-${trip.date.day.toString().padLeft(2,'0')}';
       String timeStr = '${trip.date.hour.toString().padLeft(2,'0')}:${trip.date.minute.toString().padLeft(2,'0')}';
       String feedback1 = trip.feedback.isNotEmpty ? trip.feedback.first.replaceAll(',', ';') : 'None';
       
-      print("$dateStr,$timeStr,${trip.name},${trip.duration.inSeconds},${trip.score},$feedback1");
+      debugPrint("$dateStr,$timeStr,${trip.name},${trip.duration.inSeconds},${trip.score},$feedback1");
     }
-    print("=========================================\n\n");
+    debugPrint("=========================================\n\n");
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('CSV Data printed to VS Code Debug Console!')),
     );
   }
 
-  // --- UI FORMATTING HELPERS ---
   String _fmt(Duration d) {
     final m = (d.inMinutes % 60).toString().padLeft(2, '0');
     final s = (d.inSeconds % 60).toString().padLeft(2, '0');
@@ -535,7 +297,6 @@ ManeuverStep(
     );
   }
 
-  // --- TAB 1: LIVE DASHBOARD ---
   Widget _buildHomePage() {
     return RefreshIndicator(
       onRefresh: _fetchData,
@@ -574,7 +335,6 @@ ManeuverStep(
     );
   }
 
-  // --- TAB 0: TRAINING PAGE ---
   Widget _buildTrainingPage() {
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -632,7 +392,6 @@ ManeuverStep(
     );
   }
 
-  // --- TAB 2: HISTORY PAGE ---
   Widget _buildHistoryPage() {
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -682,7 +441,6 @@ ManeuverStep(
     );
   }
 
-  // --- TAB 3: SETTINGS PAGE ---
   Widget _buildSettingsPage() {
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -702,17 +460,10 @@ ManeuverStep(
                     DropdownButton<int>(
                       value: testDurationSetting,
                       items: [5, 10, 15, 20].map((int value) {
-                        return DropdownMenuItem<int>(
-                          value: value,
-                          child: Text('$value s'),
-                        );
+                        return DropdownMenuItem<int>(value: value, child: Text('$value s'));
                       }).toList(),
                       onChanged: (newValue) {
-                        if (newValue != null) {
-                          setState(() {
-                            testDurationSetting = newValue;
-                          });
-                        }
+                        if (newValue != null) setState(() => testDurationSetting = newValue);
                       },
                     ),
                   ],
@@ -746,7 +497,6 @@ class _DataRow extends StatelessWidget {
   }
 }
 
-// --- NEW WIDGET: INTERACTIVE CAROUSEL CARD ---
 class _InteractiveManeuverCard extends StatefulWidget {
   final Maneuver maneuver;
   final bool isBusy;
@@ -777,10 +527,7 @@ class _InteractiveManeuverCardState extends State<_InteractiveManeuverCard> {
         title: Text(widget.maneuver.name, style: const TextStyle(fontWeight: FontWeight.w700)),
         subtitle: const Text('Tap to view step-by-step instructions'),
         onExpansionChanged: (expanded) {
-          if (!expanded) {
-            // Reset to the beginning if they close the card
-            setState(() => currentStepIndex = 0);
-          }
+          if (!expanded) setState(() => currentStepIndex = 0);
         },
         children: [
           Padding(
@@ -788,14 +535,11 @@ class _InteractiveManeuverCardState extends State<_InteractiveManeuverCard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // STEP COUNTER
                 Text(
                   'Step ${currentStepIndex + 1} of ${widget.maneuver.steps.length}',
                   style: TextStyle(color: Colors.indigo.shade400, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 12),
-
-                // OPTIONAL IMAGE DISPLAY
                 if (step.imagePath != null)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 16.0),
@@ -806,43 +550,26 @@ class _InteractiveManeuverCardState extends State<_InteractiveManeuverCard> {
                         height: 180,
                         width: double.infinity,
                         fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            height: 180,
-                            color: Colors.grey.shade200,
-                            child: const Center(child: Text('Image not found. Check pubspec.yaml!')),
-                          );
-                        },
+                        errorBuilder: (context, error, stackTrace) => Container(
+                          height: 180,
+                          color: Colors.grey.shade200,
+                          child: const Center(child: Text('Image not found. Check pubspec.yaml!')),
+                        ),
                       ),
                     ),
                   ),
-
-                // STEP TITLE & TEXT
-                Text(
-                  step.title,
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
-                ),
+                Text(step.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
                 const SizedBox(height: 8),
-                Text(
-                  step.text,
-                  style: const TextStyle(fontSize: 16, height: 1.4),
-                ),
+                Text(step.text, style: const TextStyle(fontSize: 16, height: 1.4)),
                 const SizedBox(height: 24),
-
-                // NAVIGATION BUTTONS
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    // BACK BUTTON
                     TextButton.icon(
-                      onPressed: currentStepIndex == 0
-                          ? null
-                          : () => setState(() => currentStepIndex--),
+                      onPressed: currentStepIndex == 0 ? null : () => setState(() => currentStepIndex--),
                       icon: const Icon(Icons.arrow_back),
                       label: const Text('Back'),
                     ),
-                    
-                    // NEXT OR START BUTTON
                     if (!isLastStep)
                       FilledButton.icon(
                         onPressed: () => setState(() => currentStepIndex++),

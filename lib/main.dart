@@ -1,16 +1,21 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+// If you put esp32_service.dart in a different folder, update this import
 import 'esp32_service.dart';
 
 void main() {
   runApp(const WheelPrettyApp());
 }
 
+enum ManeuverType { forward, backward, turnLeft, turnRight, pivot }
+
 class ManeuverStep {
+  final String title;
   final String text;
   final String? imagePath;
 
   ManeuverStep({
+    required this.title,
     required this.text,
     this.imagePath,
   });
@@ -19,12 +24,12 @@ class ManeuverStep {
 class Maneuver {
   final String name;
   final List<ManeuverStep> steps;
-  final bool isPivot;
+  final ManeuverType type;
 
   Maneuver({
     required this.name,
     required this.steps,
-    this.isPivot = false,
+    required this.type,
   });
 }
 
@@ -33,13 +38,21 @@ class SessionResult {
   final int score;
   final DateTime date;
   final Duration duration;
+  final List<String> feedback;
 
   SessionResult({
     required this.name,
     required this.score,
     required this.date,
     required this.duration,
+    required this.feedback,
   });
+}
+
+class TestEvaluation {
+  final int score;
+  final List<String> feedback;
+  TestEvaluation(this.score, this.feedback);
 }
 
 class WheelPrettyApp extends StatelessWidget {
@@ -47,14 +60,12 @@ class WheelPrettyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final seed = Colors.indigo;
-
     return MaterialApp(
       title: 'Wheelchair Monitor',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        colorSchemeSeed: seed,
+        colorSchemeSeed: Colors.indigo,
         scaffoldBackgroundColor: const Color(0xFFF6F7FB),
         cardTheme: CardThemeData(
           elevation: 1.5,
@@ -78,44 +89,102 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   late Esp32Service esp;
 
-  int _currentIndex = 0;
+  int _currentIndex = 0; // 0 is Testing, 1 is Live Data
 
+  // Settings
   bool demoMode = false;
-  bool sessionReminders = true;
-  bool connected = false;
-  bool loading = true;
-
   String baseUrl = 'http://192.168.4.1';
   int pollingMs = 300;
+  int testDurationSetting = 10; 
 
+  // Connection State
+  bool connected = false;
+  bool loading = true;
   WheelData wheelData = WheelData.empty();
-
   Timer? _pollTimer;
+
+  // Session State
   Timer? _sessionTimer;
+  Timer? _countdownTimer;
   Duration sessionElapsed = Duration.zero;
   bool sessionRunning = false;
+  bool isCountingDown = false;
+  int countdownValue = 3;
+  List<WheelData> _sessionDataPool = []; 
 
   Maneuver? selectedManeuver;
   final List<SessionResult> sessionHistory = [];
 
+  // Configured Maneuvers with the new Tutorial UI Data
   final maneuvers = [
     Maneuver(
-      name: 'Straight Line',
+      name: 'Forward Straight Line',
+      type: ManeuverType.forward,
       steps: [
-        ManeuverStep(text: 'Position the wheelchair on level ground.'),
-        ManeuverStep(text: 'Begin pushing forward in a straight line.'),
-        ManeuverStep(text: 'Keep both wheels moving as evenly as possible.'),
-        ManeuverStep(text: 'Try to maintain a smooth, controlled path.'),
+        ManeuverStep(
+          title: 'Push',
+          text: 'Hands in starting position on handrims at 11 o\'clock. Push hands forward evenly.',
+          imagePath: 'assets/images/wheeling_forward1.png',
+        ),
+        ManeuverStep(
+          title: 'Release',
+          text: 'Release hands at 2 o\'clock. Return hands to starting position (based on chosen stroke pattern).',
+          imagePath: 'assets/images/wheeling_forward2.png',
+        ),
+        ManeuverStep(
+          title: 'Stop',
+          text: 'Gently grip handrim at 1 o\'clock.',
+          imagePath: 'assets/images/wheeling_forward3.png',
+        ),
+ManeuverStep(
+          title: 'Repeat & Evaluate',
+          text: 'Repeat the stroke pattern.\n\nEvaluation Criteria: Maintain a steady cruising speed (excluding the initial push and final stop) and track a perfectly straight trajectory without veering left or right.',
+        ),
       ],
     ),
     Maneuver(
-      name: 'Pivot Turn',
-      isPivot: true,
+      name: 'Backward Straight Line',
+      type: ManeuverType.backward,
       steps: [
-        ManeuverStep(text: 'Start from a stopped position.'),
-        ManeuverStep(text: 'Push one wheel more than the other to rotate.'),
-        ManeuverStep(text: 'Try to pivot in place with control.'),
-        ManeuverStep(text: 'Stop once the target turn is completed.'),
+        ManeuverStep(
+          title: 'Get ready',
+          text: 'Grasp handrim at 1 o\'clock.',
+          imagePath: 'assets/images/wheeling_backward1.png',
+        ),
+        ManeuverStep(
+          title: 'Shoulder check',
+          text: 'Scan for obstacles in both directions.',
+          imagePath: 'assets/images/wheeling_backward2.png',
+        ),
+        ManeuverStep(
+          title: 'Pull rear wheels back evenly',
+          text: 'Use short strokes and repeat.\n\nEvaluation Criteria: Maintain a consistent backward speed (ignoring the start-up and slow-down phases) and hold a straight line without drifting off-course.',
+          imagePath: 'assets/images/wheeling_backward3.png',
+        ),
+      ],
+    ),
+    Maneuver(
+      name: 'Turning Left',
+      type: ManeuverType.turnLeft,
+      steps: [
+        ManeuverStep(title: 'Asymmetrical Push', text: 'Push harder on the right wheel.'),
+        ManeuverStep(title: 'Follow Through', text: 'Maintain forward momentum while curving left.'),
+      ],
+    ),
+    Maneuver(
+      name: 'Turning Right',
+      type: ManeuverType.turnRight,
+      steps: [
+        ManeuverStep(title: 'Asymmetrical Push', text: 'Push harder on the left wheel.'),
+        ManeuverStep(title: 'Follow Through', text: 'Maintain forward momentum while curving right.'),
+      ],
+    ),
+    Maneuver(
+      name: 'Turning on the Spot (Pivot)',
+      type: ManeuverType.pivot,
+      steps: [
+        ManeuverStep(title: 'Opposite Forces', text: 'Push forward on one wheel while pulling backward on the other.'),
+        ManeuverStep(title: 'Center Axis', text: 'Keep the wheelchair centered in its starting footprint.'),
       ],
     ),
   ];
@@ -131,13 +200,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void dispose() {
     _pollTimer?.cancel();
     _sessionTimer?.cancel();
+    _countdownTimer?.cancel();
     super.dispose();
   }
 
   void _startPolling() {
     _pollTimer?.cancel();
     _fetchData();
-
     _pollTimer = Timer.periodic(
       Duration(milliseconds: pollingMs),
       (_) => _fetchData(),
@@ -150,7 +219,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       setState(() {
         loading = false;
         connected = true;
-        wheelData = _demoData();
+        wheelData = WheelData.empty(); 
+        if (sessionRunning && !isCountingDown) _sessionDataPool.add(wheelData);
       });
       return;
     }
@@ -163,6 +233,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         wheelData = fresh;
         connected = true;
         loading = false;
+        if (sessionRunning && !isCountingDown) _sessionDataPool.add(wheelData);
       });
     } catch (_) {
       if (!mounted) return;
@@ -173,831 +244,624 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  WheelData _demoData() {
-    final seconds = DateTime.now().millisecond / 1000.0;
-    final right = 12.0 + (seconds * 2.0);
-    final left = 10.0 + (seconds * 1.5);
-
-    return WheelData(
-      rpmR: right,
-      rpmL: left,
-      signedR: right,
-      signedL: left,
-      speedMS: 0.36,
-      rpmDiff: (right - left).abs(),
-      motion: 'Straight (Forward)',
-      dirR: 'Forward',
-      dirL: 'Forward',
-      pitchDeg: 3.8,
-      slopeText: 'Uphill 3 deg',
-      yawRateDps: 7.4,
-      yawDeg: 18.0,
-      imuTurnDirection: 'Left',
-      imuTurnState: 'Turning Left',
-      imuHeadingText: '18 deg Left',
-      imuMotionState: 'Turning Detected',
-    );
-  }
-
-  void _startSession(Maneuver maneuver) {
+  // --- WORKFLOW CONTROL ---
+  void _initiateTest(Maneuver maneuver) {
     setState(() {
       selectedManeuver = maneuver;
-      sessionRunning = true;
-      sessionElapsed = Duration.zero;
-    });
-
-    _sessionTimer?.cancel();
-    _sessionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      setState(() {
-        sessionElapsed += const Duration(seconds: 1);
-      });
-    });
-  }
-
-  void _pauseSession() {
-    _sessionTimer?.cancel();
-    setState(() {
+      isCountingDown = true;
+      countdownValue = 3;
       sessionRunning = false;
-    });
-  }
-
-  void _resumeSession() {
-    if (selectedManeuver == null) return;
-    setState(() {
-      sessionRunning = true;
+      sessionElapsed = Duration.zero;
+      _sessionDataPool.clear();
     });
 
-    _sessionTimer?.cancel();
-    _sessionTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
+    _countdownTimer?.cancel();
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       setState(() {
-        sessionElapsed += const Duration(seconds: 1);
+        countdownValue--;
+        if (countdownValue <= 0) {
+          timer.cancel();
+          _beginSensing();
+        }
       });
     });
   }
 
-  void _stopSession() {
+  void _beginSensing() {
+    setState(() {
+      isCountingDown = false;
+      sessionRunning = true;
+    });
+
+    _sessionTimer?.cancel();
+    _sessionTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        sessionElapsed += const Duration(seconds: 1);
+        if (sessionElapsed.inSeconds >= testDurationSetting) {
+          _stopSessionAndScore();
+        }
+      });
+    });
+  }
+
+  void _stopSessionAndScore() {
     _sessionTimer?.cancel();
 
     if (selectedManeuver != null) {
-      final score = _calculateSessionScore();
-      sessionHistory.insert(
-        0,
-        SessionResult(
-          name: selectedManeuver!.name,
-          score: score,
-          date: DateTime.now(),
-          duration: sessionElapsed,
-        ),
+      final evaluation = _calculateSessionScore();
+      
+      final result = SessionResult(
+        name: selectedManeuver!.name,
+        score: evaluation.score,
+        date: DateTime.now(),
+        duration: sessionElapsed,
+        feedback: evaluation.feedback,
       );
+      
+      sessionHistory.insert(0, result);
+      _showFeedbackDialog(result);
     }
 
     setState(() {
       selectedManeuver = null;
       sessionRunning = false;
       sessionElapsed = Duration.zero;
+      _sessionDataPool.clear();
     });
   }
 
-  int _calculateSessionScore() {
-    double base = 70;
+  void _cancelTestEarly() {
+    _countdownTimer?.cancel();
+    _sessionTimer?.cancel();
+    setState(() {
+      selectedManeuver = null;
+      isCountingDown = false;
+      sessionRunning = false;
+      sessionElapsed = Duration.zero;
+      _sessionDataPool.clear();
+    });
+  }
 
-    if (selectedManeuver?.isPivot == true) {
-      if (wheelData.imuTurnState.contains('Turning')) base += 10;
-      if (wheelData.yawRateDps.abs() > 4) base += 10;
-      if (wheelData.rpmDiff > 2) base += 10;
-    } else {
-      if (wheelData.motion.contains('Straight')) base += 10;
-      if (wheelData.rpmDiff < 3) base += 10;
-      if (wheelData.speedMS > 0.05) base += 10;
+  // --- ANALYTICS & SCORING ENGINE ---
+  TestEvaluation _calculateSessionScore() {
+    if (_sessionDataPool.isEmpty) return TestEvaluation(0, ['No data recorded from ESP32.']);
+
+    double score = 100.0;
+    List<String> feedback = [];
+    
+    double avgSpeed = _sessionDataPool.map((d) => d.speedMS).reduce((a, b) => a + b) / _sessionDataPool.length;
+    double avgYawRate = _sessionDataPool.map((d) => d.yawRateDps).reduce((a, b) => a + b) / _sessionDataPool.length;
+    double avgAbsYawRate = _sessionDataPool.map((d) => d.yawRateDps.abs()).reduce((a, b) => a + b) / _sessionDataPool.length;
+
+    if (avgSpeed < 0.05 && selectedManeuver?.type != ManeuverType.pivot) {
+      return TestEvaluation(20, ['Minimal movement detected. Push harder to reach a measurable speed.']);
     }
 
-    return base.clamp(0, 100).round();
+    switch (selectedManeuver!.type) {
+      case ManeuverType.forward:
+      case ManeuverType.backward:
+        // 1. DRIFT ANALYSIS
+        if (avgAbsYawRate > 2.0) { 
+          score -= (avgAbsYawRate * 2.5); 
+          
+          if (avgYawRate > 1.5) {
+            feedback.add('Drifted left by an average of ${avgAbsYawRate.toStringAsFixed(1)} deg/s. Push slightly harder on your left wheel.');
+          } else if (avgYawRate < -1.5) {
+            feedback.add('Drifted right by an average of ${avgAbsYawRate.toStringAsFixed(1)} deg/s. Push slightly harder on your right wheel.');
+          } else {
+            feedback.add('Wobbled back and forth (avg ${avgAbsYawRate.toStringAsFixed(1)} deg/s deviation). Try to keep your pushes symmetrical.');
+          }
+        } else {
+          feedback.add('Excellent directional control. No significant drift detected.');
+        }
+
+        // 2. WRONG DIRECTION PENALTY (WITH DEADBAND FIX)
+        int wrongWayCount = 0;
+        double deadbandRpm = 2.0; 
+        
+        if (selectedManeuver!.type == ManeuverType.forward) {
+          wrongWayCount = _sessionDataPool.where((d) => d.signedR < -deadbandRpm || d.signedL < -deadbandRpm).length;
+        } else {
+          wrongWayCount = _sessionDataPool.where((d) => d.signedR > deadbandRpm || d.signedL > deadbandRpm).length;
+        }
+        
+        if (wrongWayCount > (_sessionDataPool.length * 0.15)) {
+          score -= 20;
+          feedback.add('Detected movement in the opposite direction. Try to minimize rolling the wrong way between pushes.');
+        }
+
+        // 3. CONSTANT SPEED ANALYSIS
+        int startIdx = (_sessionDataPool.length * 0.2).floor(); 
+        int endIdx = (_sessionDataPool.length * 0.8).floor();   
+        
+        if (endIdx > startIdx) {
+          var midPool = _sessionDataPool.sublist(startIdx, endIdx);
+          double midAvgSpeed = midPool.map((d) => d.speedMS).reduce((a, b) => a + b) / midPool.length;
+          
+          double totalDeviation = 0.0;
+          for (var d in midPool) {
+            totalDeviation += (d.speedMS - midAvgSpeed).abs();
+          }
+          double avgDeviation = totalDeviation / midPool.length;
+
+          if (avgDeviation > 0.08) {
+            score -= (avgDeviation * 80); 
+            feedback.add('Cruising speed varied (±${avgDeviation.toStringAsFixed(2)} m/s average deviation). Focus on smooth, continuous follow-through.');
+          } else {
+            feedback.add('Great job maintaining a steady cruising speed of ${midAvgSpeed.toStringAsFixed(2)} m/s.');
+          }
+        }
+        break;
+
+      case ManeuverType.turnLeft:
+      case ManeuverType.turnRight:
+        if (selectedManeuver!.type == ManeuverType.turnLeft) {
+          if (avgYawRate <= 1.0) {
+            score -= 40;
+            feedback.add('Did not detect a sufficient left turn. Push harder on the right wheel.');
+          } else {
+            feedback.add('Good left turn rotation detected (${avgYawRate.toStringAsFixed(1)} deg/s).');
+          }
+        } else {
+          if (avgYawRate >= -1.0) {
+            score -= 40;
+            feedback.add('Did not detect a sufficient right turn. Push harder on the left wheel.');
+          } else {
+             feedback.add('Good right turn rotation detected (${avgYawRate.abs().toStringAsFixed(1)} deg/s).');
+          }
+        }
+        break;
+
+      case ManeuverType.pivot:
+        double avgSymmetryError = _sessionDataPool.map((d) => (d.signedL + d.signedR).abs()).reduce((a, b) => a + b) / _sessionDataPool.length;
+        score -= (avgSymmetryError * 5.0);
+        
+        if (avgSymmetryError > 3.0) {
+           feedback.add('Uneven wheel rotation. Ensure one wheel pulls back at the exact speed the other pushes forward.');
+        } else {
+           feedback.add('Excellent symmetry. You pivoted perfectly on the center axis.');
+        }
+
+        if (avgYawRate.abs() < 5.0) {
+          score -= 30;
+          feedback.add('Low rotation speed detected. Try applying more force to the wheels to complete the pivot.');
+        }
+        break;
+    }
+
+    return TestEvaluation(score.clamp(0, 100).round(), feedback);
   }
 
-  String _fmt(Duration d) {
-    final h = d.inHours.toString().padLeft(2, '0');
-    final m = (d.inMinutes % 60).toString().padLeft(2, '0');
-    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
-    return '$h:$m:$s';
-  }
+  // --- EXPORT TO CSV (CONSOLE) ---
+  void _exportHistoryToConsole() {
+    if (sessionHistory.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No data to export!')));
+      return;
+    }
 
-  void _saveSettings() {
-    esp = Esp32Service(baseUrl: baseUrl);
-    _startPolling();
+    print("\n\n========== CAPSTONE CSV EXPORT ==========");
+    print("Date,Time,Test Name,Duration(s),Score,Primary Feedback");
+    
+    for (var trip in sessionHistory) {
+      String dateStr = '${trip.date.year}-${trip.date.month.toString().padLeft(2,'0')}-${trip.date.day.toString().padLeft(2,'0')}';
+      String timeStr = '${trip.date.hour.toString().padLeft(2,'0')}:${trip.date.minute.toString().padLeft(2,'0')}';
+      String feedback1 = trip.feedback.isNotEmpty ? trip.feedback.first.replaceAll(',', ';') : 'None';
+      
+      print("$dateStr,$timeStr,${trip.name},${trip.duration.inSeconds},${trip.score},$feedback1");
+    }
+    print("=========================================\n\n");
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Settings updated')),
+      const SnackBar(content: Text('CSV Data printed to VS Code Debug Console!')),
+    );
+  }
+
+  // --- UI FORMATTING HELPERS ---
+  String _fmt(Duration d) {
+    final m = (d.inMinutes % 60).toString().padLeft(2, '0');
+    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  void _showFeedbackDialog(SessionResult result) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Text('${result.name} Complete!', textAlign: TextAlign.center),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '${result.score}/100',
+              style: TextStyle(
+                fontSize: 48,
+                fontWeight: FontWeight.w900,
+                color: result.score >= 80 ? Colors.green : (result.score >= 50 ? Colors.orange : Colors.red),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text('Performance Feedback:', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            ...result.feedback.map((f) => Padding(
+              padding: const EdgeInsets.only(bottom: 10.0),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    f.contains('Excellent') || f.contains('Great') || f.contains('Good') ? Icons.check_circle : Icons.warning_amber_rounded,
+                    color: f.contains('Excellent') || f.contains('Great') || f.contains('Good') ? Colors.green : Colors.orange,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(f, style: const TextStyle(fontSize: 14))),
+                ],
+              ),
+            )),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Save & Close'),
+          ),
+        ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final pages = [
-      _buildHomePage(),
-      _buildTrainingPage(),
-      _buildHistoryPage(),
-      _buildSettingsPage(),
+      _buildTrainingPage(), 
+      _buildHomePage(),     
+      _buildHistoryPage(),  
+      _buildSettingsPage(), 
     ];
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Wheelchair Monitor'),
-        centerTitle: true,
-      ),
-      body: loading
-          ? const Center(child: CircularProgressIndicator())
-          : pages[_currentIndex],
+      appBar: AppBar(title: const Text('Wheelchair Monitor'), centerTitle: true),
+      body: loading ? const Center(child: CircularProgressIndicator()) : pages[_currentIndex],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
-        onDestinationSelected: (v) {
-          setState(() => _currentIndex = v);
-        },
+        onDestinationSelected: (v) => setState(() => _currentIndex = v),
         destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.dashboard_outlined),
-            selectedIcon: Icon(Icons.dashboard),
-            label: 'Live',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.play_circle_outline),
-            selectedIcon: Icon(Icons.play_circle),
-            label: 'Training',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.history_outlined),
-            selectedIcon: Icon(Icons.history),
-            label: 'Trips',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
-            label: 'Settings',
-          ),
+          NavigationDestination(icon: Icon(Icons.play_circle_outline), selectedIcon: Icon(Icons.play_circle), label: 'Testing'),
+          NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Live'),
+          NavigationDestination(icon: Icon(Icons.history_outlined), selectedIcon: Icon(Icons.history), label: 'History'),
+          NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
     );
   }
 
+  // --- TAB 1: LIVE DASHBOARD ---
   Widget _buildHomePage() {
     return RefreshIndicator(
       onRefresh: _fetchData,
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _ConnectionBanner(
-            connected: connected,
-            demoMode: demoMode,
-            baseUrl: baseUrl,
-          ),
-          const SizedBox(height: 16),
-          _HeroStats(
-            speed: wheelData.speedMS,
-            motion: wheelData.motion,
-            slope: wheelData.slopeText,
-            turnState: wheelData.imuTurnState,
-          ),
-          const SizedBox(height: 16),
-          _PrettySection(
-            title: 'Encoder Live Data',
-            icon: Icons.tire_repair,
-            child: Column(
-              children: [
-                _PrettyRow(label: 'Right Wheel RPM', value: wheelData.rpmR.toStringAsFixed(2)),
-                _PrettyRow(label: 'Left Wheel RPM', value: wheelData.rpmL.toStringAsFixed(2)),
-                _PrettyRow(label: 'Signed Right RPM', value: wheelData.signedR.toStringAsFixed(2)),
-                _PrettyRow(label: 'Signed Left RPM', value: wheelData.signedL.toStringAsFixed(2)),
-                _PrettyRow(label: 'Right Direction', value: wheelData.dirR),
-                _PrettyRow(label: 'Left Direction', value: wheelData.dirL),
-                _PrettyRow(label: 'Vehicle Speed', value: '${wheelData.speedMS.toStringAsFixed(3)} m/s'),
-                _PrettyRow(label: 'RPM Difference', value: wheelData.rpmDiff.toStringAsFixed(2)),
-                _PrettyRow(label: 'Encoder Motion State', value: wheelData.motion, highlight: true),
-              ],
+          Card(
+            child: ListTile(
+              leading: Icon(connected ? Icons.wifi : Icons.wifi_off, color: connected ? Colors.green : Colors.red),
+              title: Text(connected ? 'Connected to ESP32' : 'Disconnected'),
+              subtitle: Text(baseUrl),
             ),
           ),
           const SizedBox(height: 16),
-          _PrettySection(
-            title: 'IMU Live Data',
-            icon: Icons.sensors,
-            child: Column(
-              children: [
-                _PrettyRow(label: 'Pitch from Boot', value: '${wheelData.pitchDeg.toStringAsFixed(2)}°'),
-                _PrettyRow(label: 'Slope State', value: wheelData.slopeText, highlight: true),
-                _PrettyRow(label: 'Yaw Rate', value: '${wheelData.yawRateDps.toStringAsFixed(2)} deg/s'),
-                _PrettyRow(label: 'Yaw Angle from Start', value: '${wheelData.yawDeg.toStringAsFixed(2)}°'),
-                _PrettyRow(label: 'IMU Turn Direction', value: wheelData.imuTurnDirection),
-                _PrettyRow(label: 'IMU Turn State', value: wheelData.imuTurnState, highlight: true),
-                _PrettyRow(label: 'IMU Heading Change', value: wheelData.imuHeadingText),
-                _PrettyRow(label: 'IMU Motion State', value: wheelData.imuMotionState, highlight: true),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTrainingPage() {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Training Session',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 14),
-                Container(
-                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 18),
-                  decoration: BoxDecoration(
-                    color: Colors.indigo.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.timer_outlined, size: 30),
-                      const SizedBox(width: 14),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Session Timer',
-                            style: TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          Text(
-                            _fmt(sessionElapsed),
-                            style: const TextStyle(
-                              fontSize: 28,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                if (selectedManeuver != null) ...[
-                  _TrainingStatusBox(
-                    title: selectedManeuver!.name,
-                    encoderState: wheelData.motion,
-                    imuState: wheelData.imuTurnState,
-                    heading: wheelData.imuHeadingText,
-                    speed: wheelData.speedMS,
-                    rpmDiff: wheelData.rpmDiff,
-                    slope: wheelData.slopeText,
-                  ),
-                  const SizedBox(height: 16),
-                ],
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    FilledButton.icon(
-                      onPressed: sessionRunning
-                          ? null
-                          : () => _startSession(maneuvers[0]),
-                      icon: const Icon(Icons.straighten),
-                      label: const Text('Start Straight Line'),
-                    ),
-                    FilledButton.tonalIcon(
-                      onPressed: sessionRunning
-                          ? null
-                          : () => _startSession(maneuvers[1]),
-                      icon: const Icon(Icons.rotate_right),
-                      label: const Text('Start Pivot'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: sessionRunning ? _pauseSession : _resumeSession,
-                      icon: Icon(sessionRunning ? Icons.pause : Icons.play_arrow),
-                      label: Text(sessionRunning ? 'Pause' : 'Resume'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: selectedManeuver != null ? _stopSession : null,
-                      icon: const Icon(Icons.stop),
-                      label: const Text('Stop & Save'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        for (final maneuver in maneuvers)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 16),
-            child: _ManeuverCard(maneuver: maneuver),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildHistoryPage() {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: Row(
-              children: [
-                const Icon(Icons.route, size: 28),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    sessionHistory.isEmpty
-                        ? 'No past trips yet'
-                        : '${sessionHistory.length} saved trip/session${sessionHistory.length == 1 ? '' : 's'}',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        if (sessionHistory.isEmpty)
           Card(
             child: Padding(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(16),
               child: Column(
-                children: const [
-                  Icon(Icons.history, size: 44),
-                  SizedBox(height: 12),
-                  Text(
-                    'Complete a Straight Line or Pivot session to see it here.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16),
-                  ),
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Live Sensor Data', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Divider(),
+                  _DataRow(label: 'Speed', value: '${wheelData.speedMS.toStringAsFixed(2)} m/s'),
+                  _DataRow(label: 'Encoder Diff', value: wheelData.rpmDiff.toStringAsFixed(2)),
+                  _DataRow(label: 'Yaw Rate (Turn)', value: '${wheelData.yawRateDps.toStringAsFixed(2)} deg/s'),
+                  _DataRow(label: 'Pitch (Tilt)', value: '${wheelData.pitchDeg.toStringAsFixed(2)} deg'),
+                  _DataRow(label: 'IMU State', value: wheelData.imuTurnState),
+                  _DataRow(label: 'Right Wheel', value: wheelData.signedR.toStringAsFixed(2)),
+                  _DataRow(label: 'Left Wheel', value: wheelData.signedL.toStringAsFixed(2)),
                 ],
               ),
             ),
           )
-        else
-          ...sessionHistory.map(
-            (trip) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        trip.name,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      _PrettyRow(label: 'Score', value: '${trip.score}/100', highlight: true),
-                      _PrettyRow(label: 'Duration', value: _fmt(trip.duration)),
-                      _PrettyRow(
-                        label: 'Date',
-                        value:
-                            '${trip.date.year}-${trip.date.month.toString().padLeft(2, '0')}-${trip.date.day.toString().padLeft(2, '0')}',
-                      ),
-                      _PrettyRow(
-                        label: 'Time',
-                        value:
-                            '${trip.date.hour.toString().padLeft(2, '0')}:${trip.date.minute.toString().padLeft(2, '0')}',
-                      ),
-                    ],
+        ],
+      ),
+    );
+  }
+
+  // --- TAB 0: TRAINING PAGE ---
+  Widget _buildTrainingPage() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        if (selectedManeuver != null) ...[
+          Card(
+            color: isCountingDown ? Colors.amber.shade100 : Colors.indigo.shade50,
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                children: [
+                  Text(selectedManeuver!.name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 20),
+                  if (isCountingDown) ...[
+                    const Text('GET READY...', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.amber)),
+                    Text('$countdownValue', style: const TextStyle(fontSize: 72, fontWeight: FontWeight.w900)),
+                  ] else ...[
+                    const Text('SENSING ACTIVE', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.indigo)),
+                    const SizedBox(height: 10),
+                    Text('${_fmt(sessionElapsed)} / ${_fmt(Duration(seconds: testDurationSetting))}', style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w900)),
+                    const SizedBox(height: 10),
+                    LinearProgressIndicator(
+                      value: sessionElapsed.inSeconds / testDurationSetting,
+                      minHeight: 12,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  OutlinedButton.icon(
+                    onPressed: _cancelTestEarly,
+                    icon: const Icon(Icons.cancel),
+                    label: const Text('Cancel Test'),
                   ),
-                ),
+                ],
               ),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+
+        const Text('Select a Maneuver to Test', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 12),
+        
+        for (final maneuver in maneuvers)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _InteractiveManeuverCard(
+              maneuver: maneuver,
+              isBusy: isCountingDown || sessionRunning,
+              testDurationSetting: testDurationSetting,
+              onStart: () => _initiateTest(maneuver),
             ),
           ),
       ],
     );
   }
 
-  Widget _buildSettingsPage() {
-    final urlController = TextEditingController(text: baseUrl);
-    final pollingController = TextEditingController(text: pollingMs.toString());
+  // --- TAB 2: HISTORY PAGE ---
+  Widget _buildHistoryPage() {
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('Test Records', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            OutlinedButton.icon(
+              onPressed: _exportHistoryToConsole,
+              icon: const Icon(Icons.download),
+              label: const Text('Export CSV'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (sessionHistory.isEmpty)
+          const Center(child: Padding(
+            padding: EdgeInsets.all(32.0),
+            child: Text('Complete a test to see your scores here.'),
+          ))
+        else
+          ...sessionHistory.map((trip) => Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: ExpansionTile(
+              leading: CircleAvatar(
+                backgroundColor: trip.score >= 80 ? Colors.green.shade100 : (trip.score >= 50 ? Colors.orange.shade100 : Colors.red.shade100),
+                child: Text('${trip.score}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87)),
+              ),
+              title: Text(trip.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+              subtitle: Text('${trip.date.month}/${trip.date.day} at ${trip.date.hour}:${trip.date.minute.toString().padLeft(2,'0')} • ${_fmt(trip.duration)}'),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: trip.feedback.map((f) => Padding(
+                      padding: const EdgeInsets.only(bottom: 6.0),
+                      child: Text('• $f', style: const TextStyle(fontSize: 14, color: Colors.black87)),
+                    )).toList(),
+                  ),
+                )
+              ],
+            ),
+          )),
+      ],
+    );
+  }
 
+  // --- TAB 3: SETTINGS PAGE ---
+  Widget _buildSettingsPage() {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
         Card(
           child: Padding(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              children: [
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Demo Mode'),
-                  subtitle: const Text('Show built-in sample data instead of live ESP32 data'),
-                  value: demoMode,
-                  onChanged: (v) {
-                    setState(() {
-                      demoMode = v;
-                    });
-                    _fetchData();
-                  },
-                ),
-                const Divider(),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Session Reminders'),
-                  subtitle: const Text('Keep this as a future reminder toggle in your project UI'),
-                  value: sessionReminders,
-                  onChanged: (v) {
-                    setState(() {
-                      sessionReminders = v;
-                    });
-                  },
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(18),
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'ESP32 Connection',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: urlController,
-                  decoration: const InputDecoration(
-                    labelText: 'Base URL',
-                    hintText: 'http://192.168.4.1',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: pollingController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Polling interval (ms)',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: () {
-                      setState(() {
-                        baseUrl = urlController.text.trim();
-                        pollingMs = int.tryParse(pollingController.text.trim()) ?? 300;
-                      });
-                      _saveSettings();
-                    },
-                    child: const Text('Save Settings'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ConnectionBanner extends StatelessWidget {
-  final bool connected;
-  final bool demoMode;
-  final String baseUrl;
-
-  const _ConnectionBanner({
-    required this.connected,
-    required this.demoMode,
-    required this.baseUrl,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final good = demoMode || connected;
-    final bg = good ? Colors.green.withOpacity(0.12) : Colors.red.withOpacity(0.10);
-    final iconColor = good ? Colors.green : Colors.red;
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Row(
-          children: [
-            CircleAvatar(
-              backgroundColor: bg,
-              child: Icon(
-                good ? Icons.wifi : Icons.wifi_off,
-                color: iconColor,
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    demoMode
-                        ? 'Demo Mode Active'
-                        : connected
-                            ? 'Connected to ESP32'
-                            : 'Disconnected',
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    demoMode ? 'Showing sample app data' : baseUrl,
-                    style: const TextStyle(fontSize: 14),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _HeroStats extends StatelessWidget {
-  final double speed;
-  final String motion;
-  final String slope;
-  final String turnState;
-
-  const _HeroStats({
-    required this.speed,
-    required this.motion,
-    required this.slope,
-    required this.turnState,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _StatBubble(
-            title: 'Speed',
-            value: '${speed.toStringAsFixed(3)} m/s',
-            icon: Icons.speed,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _StatBubble(
-            title: 'Motion',
-            value: motion,
-            icon: Icons.directions_run,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _StatBubble extends StatelessWidget {
-  final String title;
-  final String value;
-  final IconData icon;
-
-  const _StatBubble({
-    required this.title,
-    required this.value,
-    required this.icon,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          children: [
-            Icon(icon, size: 28),
-            const SizedBox(height: 10),
-            Text(
-              title,
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              value,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PrettySection extends StatelessWidget {
-  final String title;
-  final IconData icon;
-  final Widget child;
-
-  const _PrettySection({
-    required this.title,
-    required this.icon,
-    required this.child,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon),
-                const SizedBox(width: 10),
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            child,
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PrettyRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final bool highlight;
-
-  const _PrettyRow({
-    required this.label,
-    required this.value,
-    this.highlight = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final valueStyle = TextStyle(
-      fontSize: 15,
-      fontWeight: highlight ? FontWeight.w800 : FontWeight.w600,
-      color: highlight ? Theme.of(context).colorScheme.primary : Colors.black87,
-    );
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              style: valueStyle,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TrainingStatusBox extends StatelessWidget {
-  final String title;
-  final String encoderState;
-  final String imuState;
-  final String heading;
-  final double speed;
-  final double rpmDiff;
-  final String slope;
-
-  const _TrainingStatusBox({
-    required this.title,
-    required this.encoderState,
-    required this.imuState,
-    required this.heading,
-    required this.speed,
-    required this.rpmDiff,
-    required this.slope,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.indigo.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(22),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Current Session: $title',
-            style: const TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 10),
-          _PrettyRow(label: 'Encoder State', value: encoderState, highlight: true),
-          _PrettyRow(label: 'IMU Turn State', value: imuState, highlight: true),
-          _PrettyRow(label: 'Heading Change', value: heading),
-          _PrettyRow(label: 'Speed', value: '${speed.toStringAsFixed(3)} m/s'),
-          _PrettyRow(label: 'RPM Difference', value: rpmDiff.toStringAsFixed(2)),
-          _PrettyRow(label: 'Slope', value: slope),
-        ],
-      ),
-    );
-  }
-}
-
-class _ManeuverCard extends StatelessWidget {
-  final Maneuver maneuver;
-
-  const _ManeuverCard({required this.maneuver});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              maneuver.name,
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 12),
-            ...List.generate(
-              maneuver.steps.length,
-              (i) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                const Text('Testing Parameters', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Divider(),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    CircleAvatar(
-                      radius: 13,
-                      child: Text(
-                        '${i + 1}',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        maneuver.steps[i].text,
-                        style: const TextStyle(fontSize: 15),
-                      ),
+                    const Text('Test Duration (seconds):', style: TextStyle(fontSize: 16)),
+                    DropdownButton<int>(
+                      value: testDurationSetting,
+                      items: [5, 10, 15, 20].map((int value) {
+                        return DropdownMenuItem<int>(
+                          value: value,
+                          child: Text('$value s'),
+                        );
+                      }).toList(),
+                      onChanged: (newValue) {
+                        if (newValue != null) {
+                          setState(() {
+                            testDurationSetting = newValue;
+                          });
+                        }
+                      },
                     ),
                   ],
                 ),
-              ),
+              ],
             ),
-          ],
+          ),
         ),
+      ],
+    );
+  }
+}
+
+class _DataRow extends StatelessWidget {
+  final String label;
+  final String value;
+  const _DataRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+}
+
+// --- NEW WIDGET: INTERACTIVE CAROUSEL CARD ---
+class _InteractiveManeuverCard extends StatefulWidget {
+  final Maneuver maneuver;
+  final bool isBusy;
+  final int testDurationSetting;
+  final VoidCallback onStart;
+
+  const _InteractiveManeuverCard({
+    required this.maneuver,
+    required this.isBusy,
+    required this.testDurationSetting,
+    required this.onStart,
+  });
+
+  @override
+  State<_InteractiveManeuverCard> createState() => _InteractiveManeuverCardState();
+}
+
+class _InteractiveManeuverCardState extends State<_InteractiveManeuverCard> {
+  int currentStepIndex = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final step = widget.maneuver.steps[currentStepIndex];
+    final isLastStep = currentStepIndex == widget.maneuver.steps.length - 1;
+
+    return Card(
+      child: ExpansionTile(
+        title: Text(widget.maneuver.name, style: const TextStyle(fontWeight: FontWeight.w700)),
+        subtitle: const Text('Tap to view step-by-step instructions'),
+        onExpansionChanged: (expanded) {
+          if (!expanded) {
+            // Reset to the beginning if they close the card
+            setState(() => currentStepIndex = 0);
+          }
+        },
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // STEP COUNTER
+                Text(
+                  'Step ${currentStepIndex + 1} of ${widget.maneuver.steps.length}',
+                  style: TextStyle(color: Colors.indigo.shade400, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+
+                // OPTIONAL IMAGE DISPLAY
+                if (step.imagePath != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16.0),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.asset(
+                        step.imagePath!,
+                        height: 180,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            height: 180,
+                            color: Colors.grey.shade200,
+                            child: const Center(child: Text('Image not found. Check pubspec.yaml!')),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+
+                // STEP TITLE & TEXT
+                Text(
+                  step.title,
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  step.text,
+                  style: const TextStyle(fontSize: 16, height: 1.4),
+                ),
+                const SizedBox(height: 24),
+
+                // NAVIGATION BUTTONS
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // BACK BUTTON
+                    TextButton.icon(
+                      onPressed: currentStepIndex == 0
+                          ? null
+                          : () => setState(() => currentStepIndex--),
+                      icon: const Icon(Icons.arrow_back),
+                      label: const Text('Back'),
+                    ),
+                    
+                    // NEXT OR START BUTTON
+                    if (!isLastStep)
+                      FilledButton.icon(
+                        onPressed: () => setState(() => currentStepIndex++),
+                        icon: const Icon(Icons.arrow_forward),
+                        label: const Text('Next'),
+                      )
+                    else
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(backgroundColor: Colors.green.shade600),
+                        onPressed: widget.isBusy ? null : widget.onStart,
+                        icon: const Icon(Icons.play_arrow),
+                        label: Text('Start ${widget.testDurationSetting}s Test'),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

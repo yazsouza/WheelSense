@@ -23,6 +23,12 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/wheeling_forward.png
+    - assets/images/wheeling_forward1.png    
+    - assets/images/wheeling_forward2.png
+    - assets/images/wheeling_forward3.png
+    - assets/images/wheeling_backward1.png    
+    - assets/images/wheeling_backward2.png
+    - assets/images/wheeling_backward3.png
     - assets/images/wheeling_on_spot.png
     - assets/icons/cat.png
 

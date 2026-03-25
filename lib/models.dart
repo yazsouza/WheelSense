@@ -1,4 +1,3 @@
-// lib/models.dart
 import 'esp32_service.dart';
 
 enum ManeuverType { forward, backward, turnLeft, turnRight, pivot }
@@ -18,6 +17,7 @@ class ManeuverStep {
 class TestEvaluation {
   final int score;
   final List<String> feedback;
+
   TestEvaluation(this.score, this.feedback);
 }
 
@@ -41,8 +41,7 @@ class Maneuver {
   final String name;
   final ManeuverType type;
   final List<ManeuverStep> steps;
-  // This is the magic! Each maneuver now contains its own scoring math.
-  final TestEvaluation Function(List<WheelData> dataPool) evaluator; 
+  final TestEvaluation Function(List<WheelData> dataPool) evaluator;
 
   Maneuver({
     required this.name,

@@ -41,32 +41,103 @@ class WheelData {
     required this.imuMotionState,
   });
 
-  factory WheelData.fromJson(Map<String, dynamic> json) {
-    double parseNum(dynamic v) {
-      if (v is num) return v.toDouble();
-      return double.tryParse(v.toString()) ?? 0.0;
-    }
+  static double _parseNum(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString()) ?? 0.0;
+  }
 
-    String parseStr(dynamic v) => v?.toString() ?? '';
+  static String _parseStr(dynamic value, [String fallback = '']) {
+    if (value == null) return fallback;
+    final text = value.toString().trim();
+    return text.isEmpty ? fallback : text;
+  }
+
+  static double _signedFromDirection(double rpm, String direction) {
+    switch (direction.toLowerCase()) {
+      case 'forward':
+        return rpm;
+      case 'backward':
+        return -rpm;
+      default:
+        return 0.0;
+    }
+  }
+
+  factory WheelData.fromJson(Map<String, dynamic> json) {
+    final rpmR = _parseNum(json['rpmR']);
+    final rpmL = _parseNum(json['rpmL']);
+
+    final dirR = _parseStr(json['dirR'], 'Stopped');
+    final dirL = _parseStr(json['dirL'], 'Stopped');
+
+    final signedR = json.containsKey('signedR')
+        ? _parseNum(json['signedR'])
+        : _signedFromDirection(rpmR, dirR);
+
+    final signedL = json.containsKey('signedL')
+        ? _parseNum(json['signedL'])
+        : _signedFromDirection(rpmL, dirL);
 
     return WheelData(
-      rpmR: parseNum(json['rpmR']),
-      rpmL: parseNum(json['rpmL']),
-      signedR: parseNum(json['signedR']),
-      signedL: parseNum(json['signedL']),
-      speedMS: parseNum(json['speed_m_s']),
-      rpmDiff: parseNum(json['rpm_diff']),
-      motion: parseStr(json['motion']),
-      dirR: parseStr(json['dirR']),
-      dirL: parseStr(json['dirL']),
-      pitchDeg: parseNum(json['pitch_deg']),
-      slopeText: parseStr(json['slope_text']),
-      yawRateDps: parseNum(json['yaw_rate_dps']),
-      yawDeg: parseNum(json['yaw_deg']),
-      imuTurnDirection: parseStr(json['imu_turn_direction']),
-      imuTurnState: parseStr(json['imu_turn_state']),
-      imuHeadingText: parseStr(json['imu_heading_text']),
-      imuMotionState: parseStr(json['imu_motion_state']),
+      rpmR: rpmR,
+      rpmL: rpmL,
+      signedR: signedR,
+      signedL: signedL,
+
+      // New Arduino keys
+      speedMS: json.containsKey('speed_m_s')
+          ? _parseNum(json['speed_m_s'])
+          : _parseNum(json['speed']),
+
+      rpmDiff: json.containsKey('rpm_diff')
+          ? _parseNum(json['rpm_diff'])
+          : _parseNum(json['diff']),
+
+      motion: json.containsKey('motion')
+          ? _parseStr(json['motion'], 'Stopped')
+          : _parseStr(json['turnState'], 'Stopped'),
+
+      dirR: dirR,
+      dirL: dirL,
+
+      pitchDeg: json.containsKey('pitch_deg')
+          ? _parseNum(json['pitch_deg'])
+          : _parseNum(json['pitchDeg']),
+
+      slopeText: json.containsKey('slope_text')
+          ? _parseStr(json['slope_text'], 'Level ground')
+          : _parseStr(json['slopeText'], 'Level ground'),
+
+      yawRateDps: json.containsKey('yaw_rate_dps')
+          ? _parseNum(json['yaw_rate_dps'])
+          : _parseNum(json['yawRate']),
+
+      yawDeg: json.containsKey('yaw_deg')
+          ? _parseNum(json['yaw_deg'])
+          : _parseNum(json['yawDeg']),
+
+      imuTurnDirection: json.containsKey('imu_turn_direction')
+          ? _parseStr(json['imu_turn_direction'], 'Straight')
+          : _parseStr(json['imuTurnDirection'], 'Straight'),
+
+      imuTurnState: json.containsKey('imu_turn_state')
+          ? _parseStr(json['imu_turn_state'], 'Not Turning')
+          : _parseStr(json['imuTurnState'], 'Not Turning'),
+
+      imuHeadingText: json.containsKey('imu_heading_text')
+          ? _parseStr(
+              json['imu_heading_text'],
+              'Centered / near start heading',
+            )
+          : _parseStr(
+              json['imuAngleText'],
+              'Centered / near start heading',
+            ),
+
+      imuMotionState: json.containsKey('imu_motion_state')
+          ? _parseStr(json['imu_motion_state'], 'No Turning Detected')
+          : _parseStr(json['imuState'], 'No Turning Detected'),
     );
   }
 
@@ -100,14 +171,25 @@ class Esp32Service {
 
   Future<WheelData> fetchWheelData() async {
     final response = await http
-        .get(Uri.parse('$baseUrl/data'))
-        .timeout(const Duration(seconds: 2));
+        .get(
+          Uri.parse('$baseUrl/data'),
+          headers: const {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+          },
+        )
+        .timeout(const Duration(seconds: 3));
 
     if (response.statusCode != 200) {
       throw Exception('ESP32 returned status ${response.statusCode}');
     }
 
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final decoded = jsonDecode(response.body);
+
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('ESP32 response was not a JSON object');
+    }
+
     return WheelData.fromJson(decoded);
   }
 }

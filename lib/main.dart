@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:io';
+
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'esp32_service.dart';
 import 'models.dart';
@@ -61,7 +65,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Timer? _sessionTimer;
   Timer? _countdownTimer;
-  Duration sessionElapsed = Duration.zero;
+
+  Duration sessionRemaining = Duration.zero;
   bool sessionRunning = false;
   bool isCountingDown = false;
   int countdownValue = 3;
@@ -138,7 +143,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       isCountingDown = true;
       countdownValue = 3;
       sessionRunning = false;
-      sessionElapsed = Duration.zero;
+      sessionRemaining = Duration(seconds: testDurationSetting);
       _sessionDataPool.clear();
     });
 
@@ -158,14 +163,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() {
       isCountingDown = false;
       sessionRunning = true;
+      sessionRemaining = Duration(seconds: testDurationSetting);
     });
 
     _sessionTimer?.cancel();
     _sessionTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
+
       setState(() {
-        sessionElapsed += const Duration(seconds: 1);
-        if (sessionElapsed.inSeconds >= testDurationSetting) {
+        final nextRemaining = sessionRemaining - const Duration(seconds: 1);
+
+        if (nextRemaining.inSeconds <= 0) {
+          sessionRemaining = Duration.zero;
+          timer.cancel();
           _stopSessionAndScore();
+        } else {
+          sessionRemaining = nextRemaining;
         }
       });
     });
@@ -181,7 +194,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         name: selectedManeuver!.name,
         score: evaluation.score,
         date: DateTime.now(),
-        duration: sessionElapsed,
+        duration: Duration(seconds: testDurationSetting),
         feedback: evaluation.feedback,
       );
 
@@ -192,7 +205,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() {
       selectedManeuver = null;
       sessionRunning = false;
-      sessionElapsed = Duration.zero;
+      sessionRemaining = Duration.zero;
       _sessionDataPool.clear();
     });
   }
@@ -204,7 +217,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       selectedManeuver = null;
       isCountingDown = false;
       sessionRunning = false;
-      sessionElapsed = Duration.zero;
+      sessionRemaining = Duration.zero;
       _sessionDataPool.clear();
     });
   }
@@ -291,40 +304,77 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return practiced.length;
   }
 
-  void _exportHistoryToConsole() {
+  String _escapeCsv(String value) {
+    final escaped = value.replaceAll('"', '""');
+    return '"$escaped"';
+  }
+
+  Future<void> _exportHistoryToPhone() async {
     final historyToExport = _getFilteredHistory();
 
     if (historyToExport.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No data to export!')),
+        const SnackBar(content: Text('No data to export.')),
       );
       return;
     }
 
-    debugPrint("\n\n========== CAPSTONE CSV EXPORT ==========");
-    debugPrint("Date,Time,Test Name,Duration(s),Score,Primary Feedback");
+    final buffer = StringBuffer();
+    buffer.writeln('Date,Time,Test Name,Duration(s),Score,Feedback');
 
-    for (var trip in historyToExport) {
-      String dateStr =
+    for (final trip in historyToExport) {
+      final dateStr =
           '${trip.date.year}-${trip.date.month.toString().padLeft(2, '0')}-${trip.date.day.toString().padLeft(2, '0')}';
-      String timeStr =
+      final timeStr =
           '${trip.date.hour.toString().padLeft(2, '0')}:${trip.date.minute.toString().padLeft(2, '0')}';
-      String feedback1 =
-          trip.feedback.isNotEmpty ? trip.feedback.first.replaceAll(',', ';') : 'None';
+      final feedbackJoined =
+          trip.feedback.isNotEmpty ? trip.feedback.join(' | ') : 'None';
 
-      debugPrint(
-        "$dateStr,$timeStr,${trip.name},${trip.duration.inSeconds},${trip.score},$feedback1",
+      buffer.writeln(
+        [
+          _escapeCsv(dateStr),
+          _escapeCsv(timeStr),
+          _escapeCsv(trip.name),
+          trip.duration.inSeconds,
+          trip.score,
+          _escapeCsv(feedbackJoined),
+        ].join(','),
       );
     }
-    debugPrint("=========================================\n\n");
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'CSV Data for ${_historyLabel(_selectedHistoryTimeframe)} printed to VS Code Debug Console!',
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final timeframeLabel = _historyLabel(_selectedHistoryTimeframe)
+          .toLowerCase()
+          .replaceAll(' ', '_');
+      final file =
+          File('${dir.path}/wheelchair_history_${timeframeLabel}_$timestamp.csv');
+
+      await file.writeAsString(buffer.toString());
+
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        text: 'Wheelchair Monitor CSV export',
+        subject: 'Wheelchair Monitor CSV export',
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'CSV created on your phone. Use the share sheet to save or send it.',
+          ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to export CSV: $e'),
+        ),
+      );
+    }
   }
 
   String _fmt(Duration d) {
@@ -504,7 +554,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     label: 'Pitch (Tilt)',
                     value: '${wheelData.pitchDeg.toStringAsFixed(2)} deg',
                   ),
-                  _DataRow(label: 'IMU State', value: wheelData.imuTurnState),
+                  _DataRow(label: 'Motion', value: wheelData.motion),
+                  _DataRow(label: 'IMU State', value: wheelData.imuMotionState),
                   _DataRow(
                     label: 'Right Wheel',
                     value: wheelData.signedR.toStringAsFixed(2),
@@ -516,7 +567,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
               ),
             ),
-          )
+          ),
         ],
       ),
     );
@@ -570,15 +621,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      '${_fmt(sessionElapsed)} / ${_fmt(Duration(seconds: testDurationSetting))}',
+                      _fmt(sessionRemaining),
                       style: const TextStyle(
                         fontSize: 48,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'remaining',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey.shade700,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     const SizedBox(height: 10),
                     LinearProgressIndicator(
-                      value: sessionElapsed.inSeconds / testDurationSetting,
+                      value: testDurationSetting == 0
+                          ? 0
+                          : sessionRemaining.inSeconds / testDurationSetting,
                       minHeight: 12,
                       borderRadius: BorderRadius.circular(6),
                     ),
@@ -630,7 +692,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             OutlinedButton.icon(
-              onPressed: _exportHistoryToConsole,
+              onPressed: _exportHistoryToPhone,
               icon: const Icon(Icons.download),
               label: const Text('Export CSV'),
             ),
@@ -731,7 +793,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           )
                           .toList(),
                     ),
-                  )
+                  ),
                 ],
               ),
             ),
@@ -790,7 +852,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 class _DataRow extends StatelessWidget {
   final String label;
   final String value;
-  const _DataRow({required this.label, required this.value});
+
+  const _DataRow({
+    required this.label,
+    required this.value,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -882,7 +948,9 @@ class _InteractiveManeuverCardState extends State<_InteractiveManeuverCard> {
         ),
         subtitle: const Text('Tap to view step-by-step instructions'),
         onExpansionChanged: (expanded) {
-          if (!expanded) setState(() => currentStepIndex = 0);
+          if (!expanded) {
+            setState(() => currentStepIndex = 0);
+          }
         },
         children: [
           Padding(
@@ -954,7 +1022,8 @@ class _InteractiveManeuverCardState extends State<_InteractiveManeuverCard> {
                         ),
                         onPressed: widget.isBusy ? null : widget.onStart,
                         icon: const Icon(Icons.play_arrow),
-                        label: Text('Start ${widget.testDurationSetting}s Test'),
+                        label:
+                            Text('Start ${widget.testDurationSetting}s Test'),
                       ),
                   ],
                 ),

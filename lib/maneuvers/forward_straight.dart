@@ -52,7 +52,15 @@ final forwardStraightLine = Maneuver(
       feedback.add('Excellent directional control. No drift detected.');
     }
 
-    // 2. CONSTANT SPEED ANALYSIS
+    //2. WRONG DIRECTION PENALTY (Backward Detection)
+    double deadbandRpm = 2.0; 
+    int wrongWayCount = pool.where((d) => d.signedR < -deadbandRpm || d.signedL < -deadbandRpm).length;
+    if (wrongWayCount > (pool.length * 0.15)) {
+      score -= 20;
+      feedback.add('Detected movement in the opposite direction. Try to minimize rolling backward between pushes.');
+    }
+
+    // 3. CONSTANT SPEED ANALYSIS
     int startIdx = (pool.length * 0.2).floor(); 
     int endIdx = (pool.length * 0.8).floor();   
     if (endIdx > startIdx) {

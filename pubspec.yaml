@@ -36,9 +36,10 @@ flutter:
     - assets/images/wheeling_backward2.png
     - assets/images/wheeling_backward3.png
     - assets/images/wheeling_on_spot.png
-    - assets/icons/cat.png
+    - assets/icons/logo.png
+
 
 flutter_icons:
   android: true
   ios: true
-  image_path: assets/icons/cat.png
+  image_path: assets/icons/logo.png

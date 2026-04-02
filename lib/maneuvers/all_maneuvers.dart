@@ -4,6 +4,8 @@ import 'backward_straight.dart';
 import 'turn_left.dart';
 import 'turn_right.dart';
 import 'pivot.dart';
+import 'up_ramp.dart';
+import 'down_ramp.dart';
 
 final List<Maneuver> appManeuvers = [
   forwardStraightLine,
@@ -11,4 +13,6 @@ final List<Maneuver> appManeuvers = [
   turnLeftManeuver,
   turnRightManeuver,
   pivotManeuver,
+  upRampManeuver,      
+  downRampManeuver,    
 ];

@@ -55,8 +55,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   bool demoMode = false;
   String baseUrl = 'http://192.168.4.1';
-  
-  // FIX: Lowered polling to 150ms to get more data points and prevent empty list errors
   int pollingMs = 150; 
   int testDurationSetting = 10;
 
@@ -80,6 +78,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   final maneuvers = appManeuvers;
 
+  // FIX 1: Add a ScrollController for the Training Page
+  final ScrollController _trainingScrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
@@ -92,6 +93,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _pollTimer?.cancel();
     _sessionTimer?.cancel();
     _countdownTimer?.cancel();
+    _trainingScrollController.dispose(); // Always dispose controllers!
     super.dispose();
   }
 
@@ -140,6 +142,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _initiateTest(Maneuver maneuver) {
+    // FIX 1: Scroll to the top when the test is initiated
+    if (_trainingScrollController.hasClients) {
+      _trainingScrollController.animateTo(
+        0.0,
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeInOut,
+      );
+    }
+
     setState(() {
       selectedManeuver = maneuver;
       isCountingDown = true;
@@ -190,14 +201,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _sessionTimer?.cancel();
 
     if (selectedManeuver != null) {
-      // FIX: Safety Gate - Check for minimum data (at least 3 points) to prevent RangeErrors
       if (_sessionDataPool.length < 3) {
         _showErrorDialog(
           "Test Incomplete",
           "Not enough sensor data was captured. Please ensure the ESP32 is connected and try moving a bit slower.",
         );
       } else {
-        // Safe to evaluate now
         final evaluation = selectedManeuver!.evaluator(_sessionDataPool);
 
         final result = SessionResult(
@@ -394,7 +403,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return '$m:$s';
   }
 
-  // FIX: Added the error dialog helper function
   void _showErrorDialog(String title, String message) {
     showDialog(
       context: context,
@@ -605,6 +613,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildTrainingPage() {
     return ListView(
+      // FIX 1: Attach the ScrollController here
+      controller: _trainingScrollController, 
       padding: const EdgeInsets.all(16),
       children: [
         if (selectedManeuver != null) ...[
@@ -694,8 +704,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         const SizedBox(height: 12),
         for (final maneuver in maneuvers)
           Padding(
+            // FIX 2: Give the wrapper a specific ValueKey
+            key: ValueKey(maneuver.name), 
             padding: const EdgeInsets.only(bottom: 12),
             child: _InteractiveManeuverCard(
+              // FIX 2: Give the actual widget a specific ValueKey
+              key: ValueKey('${maneuver.name}_card'), 
               maneuver: maneuver,
               isBusy: isCountingDown || sessionRunning,
               testDurationSetting: testDurationSetting,
@@ -951,6 +965,7 @@ class _InteractiveManeuverCard extends StatefulWidget {
   final VoidCallback onStart;
 
   const _InteractiveManeuverCard({
+    super.key, // FIX 2: Need to pass the key down to the superclass
     required this.maneuver,
     required this.isBusy,
     required this.testDurationSetting,
@@ -975,6 +990,8 @@ class _InteractiveManeuverCardState extends State<_InteractiveManeuverCard> {
 
     return Card(
       child: ExpansionTile(
+        // FIX 2: Ensuring ExpansionTile specifically maintains state 
+        key: PageStorageKey(widget.maneuver.name),
         title: Text(
           widget.maneuver.name,
           style: const TextStyle(fontWeight: FontWeight.w700),

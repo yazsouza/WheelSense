@@ -6,29 +6,59 @@ final turnLeftManeuver = Maneuver(
   type: ManeuverType.turnLeft,
   steps: [
     ManeuverStep(
-      title: 'Asymmetrical Push', 
+      title: 'Asymmetrical Push',
       text: 'Push harder on the right wheel to initiate the turn.',
     ),
     ManeuverStep(
-      title: 'Follow Through', 
+      title: 'Follow Through',
       text: 'Maintain forward momentum while curving left.',
     ),
   ],
   evaluator: (List<WheelData> pool) {
     if (pool.isEmpty) return TestEvaluation(0, ['No data recorded.']);
-    
+
     double score = 100.0;
     List<String> feedback = [];
-    double avgYawRate = pool.map((d) => d.yawRateDps).reduce((a, b) => a + b) / pool.length;
 
-    // Expected Positive Yaw Rate for Left Turn
-    if (avgYawRate <= 1.0) {
-      score -= 40;
-      feedback.add('Did not detect a sufficient left turn. Push harder on the right wheel to rotate the chassis.');
-    } else {
-      feedback.add('Good left turn rotation detected (${avgYawRate.toStringAsFixed(1)} deg/s average).');
+    if (pool.length < 5) {
+      return TestEvaluation(0, ['Not enough data collected. Try again.']);
     }
 
-    return TestEvaluation(score.clamp(0, 100).round(), feedback);
+    double avgYawRate = pool.map((d) => d.yawRateDps).reduce((a, b) => a + b) / pool.length;
+    double avgAbsYawRate = pool.map((d) => d.yawRateDps.abs()).reduce((a, b) => a + b) / pool.length;
+    double wobble = pool.map((d) => (d.yawRateDps - avgYawRate).abs()).reduce((a, b) => a + b) / pool.length;
+
+    // FIX: PEAK TILT SENSITIVITY
+    final maxPitch = pool.map((d) => d.pitchDeg.abs()).reduce((a, b) => a > b ? a : b);
+
+    // 1. TURN DETECTION (Left is Positive Yaw)
+    if (avgYawRate <= 1.0) {
+      score -= 30;
+      feedback.add('Not enough left turning detected. Push more on the right wheel.');
+    } else {
+      feedback.add('Good left turning motion detected (${avgYawRate.toStringAsFixed(1)} deg/s).');
+    }
+
+    // 2. WOBBLE DETECTION
+    if (wobble > 4.5) {
+      score -= 15;
+      feedback.add('Turn was uneven. Try smoother continuous pushes.');
+    } else {
+      feedback.add('Smooth turning motion.');
+    }
+
+    // 3. TOO STRAIGHT PENALTY
+    if (avgAbsYawRate < 1.5) {
+      score -= 20;
+      feedback.add('Movement was mostly straight instead of turning.');
+    }
+
+    // 4. FIX: TILT CHECK (Harsher Peak Sensitivity)
+    if (maxPitch > 4.0) {
+      score -= 20;
+      feedback.add('Wheelchair tilted during turn. Keep your weight forward for stability.');
+    }
+
+    return TestEvaluation(score.clamp(0, 100).round(), feedback.take(3).toList());
   },
 );

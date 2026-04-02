@@ -23,7 +23,7 @@ class WheelPrettyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Wheelchair Monitor',
+      title: 'WheelSense',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -55,7 +55,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   bool demoMode = false;
   String baseUrl = 'http://192.168.4.1';
-  int pollingMs = 300;
+  
+  // FIX: Lowered polling to 150ms to get more data points and prevent empty list errors
+  int pollingMs = 150; 
   int testDurationSetting = 10;
 
   bool connected = false;
@@ -188,18 +190,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _sessionTimer?.cancel();
 
     if (selectedManeuver != null) {
-      final evaluation = selectedManeuver!.evaluator(_sessionDataPool);
+      // FIX: Safety Gate - Check for minimum data (at least 3 points) to prevent RangeErrors
+      if (_sessionDataPool.length < 3) {
+        _showErrorDialog(
+          "Test Incomplete",
+          "Not enough sensor data was captured. Please ensure the ESP32 is connected and try moving a bit slower.",
+        );
+      } else {
+        // Safe to evaluate now
+        final evaluation = selectedManeuver!.evaluator(_sessionDataPool);
 
-      final result = SessionResult(
-        name: selectedManeuver!.name,
-        score: evaluation.score,
-        date: DateTime.now(),
-        duration: Duration(seconds: testDurationSetting),
-        feedback: evaluation.feedback,
-      );
+        final result = SessionResult(
+          name: selectedManeuver!.name,
+          score: evaluation.score,
+          date: DateTime.now(),
+          duration: Duration(seconds: testDurationSetting),
+          feedback: evaluation.feedback,
+        );
 
-      sessionHistory.insert(0, result);
-      _showFeedbackDialog(result);
+        sessionHistory.insert(0, result);
+        _showFeedbackDialog(result);
+      }
     }
 
     setState(() {
@@ -355,8 +366,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       await Share.shareXFiles(
         [XFile(file.path)],
-        text: 'Wheelchair Monitor CSV export',
-        subject: 'Wheelchair Monitor CSV export',
+        text: 'WheelSense CSV export',
+        subject: 'WheelSense CSV export',
       );
 
       if (!mounted) return;
@@ -381,6 +392,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final m = (d.inMinutes % 60).toString().padLeft(2, '0');
     final s = (d.inSeconds % 60).toString().padLeft(2, '0');
     return '$m:$s';
+  }
+
+  // FIX: Added the error dialog helper function
+  void _showErrorDialog(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showFeedbackDialog(SessionResult result) {
@@ -417,12 +445,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     Icon(
                       f.contains('Excellent') ||
                               f.contains('Great') ||
-                              f.contains('Good')
+                              f.contains('Good') ||
+                              f.contains('Perfect')
                           ? Icons.check_circle
                           : Icons.warning_amber_rounded,
                       color: f.contains('Excellent') ||
                               f.contains('Great') ||
-                              f.contains('Good')
+                              f.contains('Good') ||
+                              f.contains('Perfect')
                           ? Colors.green
                           : Colors.orange,
                       size: 20,
@@ -461,7 +491,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Wheelchair Monitor'),
+        title: const Text('WheelSense'),
         centerTitle: true,
       ),
       body: loading
@@ -937,6 +967,9 @@ class _InteractiveManeuverCardState extends State<_InteractiveManeuverCard> {
 
   @override
   Widget build(BuildContext context) {
+    if (currentStepIndex >= widget.maneuver.steps.length) {
+      currentStepIndex = 0;
+    }
     final step = widget.maneuver.steps[currentStepIndex];
     final isLastStep = currentStepIndex == widget.maneuver.steps.length - 1;
 

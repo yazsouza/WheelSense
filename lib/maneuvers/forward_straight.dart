@@ -1,4 +1,3 @@
-// lib/maneuvers/forward_straight.dart
 import '../models.dart';
 import '../esp32_service.dart';
 
@@ -28,56 +27,76 @@ final forwardStraightLine = Maneuver(
   ],
   evaluator: (List<WheelData> pool) {
     if (pool.isEmpty) return TestEvaluation(0, ['No data recorded.']);
-    
+
     double score = 100.0;
-    List<String> feedback = [];
+    final List<String> feedback = [];
     
-    double avgSpeed = pool.map((d) => d.speedMS).reduce((a, b) => a + b) / pool.length;
-    double avgYawRate = pool.map((d) => d.yawRateDps).reduce((a, b) => a + b) / pool.length;
-    double avgAbsYawRate = pool.map((d) => d.yawRateDps.abs()).reduce((a, b) => a + b) / pool.length;
+    final avgSpeed = pool.map((d) => d.speedMS).reduce((a, b) => a + b) / pool.length;
+    final avgYawRate = pool.map((d) => d.yawRateDps).reduce((a, b) => a + b) / pool.length;
+    final avgAbsYawRate = pool.map((d) => d.yawRateDps.abs()).reduce((a, b) => a + b) / pool.length;
 
-    if (avgSpeed < 0.05) return TestEvaluation(20, ['Minimal movement detected.']);
+    // Benchmarks
+    final maxYaw = pool.map((d) => d.yawRateDps).reduce((a, b) => a > b ? a : b);
+    final minYaw = pool.map((d) => d.yawRateDps).reduce((a, b) => a < b ? a : b);
+    
+    // FIX: PEAK TILT SENSITIVITY
+    final maxPitch = pool.map((d) => d.pitchDeg.abs()).reduce((a, b) => a > b ? a : b);
 
-    // 1. DRIFT ANALYSIS
-    if (avgAbsYawRate > 2.0) { 
-      score -= (avgAbsYawRate * 2.5); 
-      if (avgYawRate > 1.5) {
-        feedback.add('Drifted left (avg ${avgAbsYawRate.toStringAsFixed(1)} deg/s). Push harder on left wheel.');
+    if (avgSpeed < 0.05) {
+      return TestEvaluation(20, ['Minimal movement detected. Push harder to reach a measurable speed.']);
+    }
+
+    // 1. Drift analysis
+    const double driftThreshold = 2.0;
+    final driftedLeft = maxYaw > driftThreshold;
+    final driftedRight = minYaw < -driftThreshold;
+
+    if (avgAbsYawRate > driftThreshold) {
+      score -= (avgAbsYawRate * 2.8);
+      if (driftedLeft && driftedRight) {
+        feedback.add('You drifted to both sides. Try to keep both pushes more even.');
+      } else if (avgYawRate > 1.5) {
+        feedback.add('You drifted left. Push a little more evenly.');
       } else if (avgYawRate < -1.5) {
-        feedback.add('Drifted right (avg ${avgAbsYawRate.toStringAsFixed(1)} deg/s). Push harder on right wheel.');
-      } else {
-        feedback.add('Wobbled back and forth. Keep pushes symmetrical.');
+        feedback.add('You drifted right. Push a little more evenly.');
       }
     } else {
-      feedback.add('Excellent directional control. No drift detected.');
+      feedback.add('Excellent directional control.');
     }
 
-    //2. WRONG DIRECTION PENALTY (Backward Detection)
-    double deadbandRpm = 2.0; 
-    int wrongWayCount = pool.where((d) => d.signedR < -deadbandRpm || d.signedL < -deadbandRpm).length;
+    // 2. Wrong direction penalty
+    const double deadbandRpm = 2.0;
+    final wrongWayCount = pool.where((d) => d.signedR < -deadbandRpm || d.signedL < -deadbandRpm).length;
     if (wrongWayCount > (pool.length * 0.15)) {
       score -= 20;
-      feedback.add('Detected movement in the opposite direction. Try to minimize rolling backward between pushes.');
+      feedback.add('Detected rolling backward. Minimize roll between pushes.');
     }
 
-    // 3. CONSTANT SPEED ANALYSIS
-    int startIdx = (pool.length * 0.2).floor(); 
-    int endIdx = (pool.length * 0.8).floor();   
-    if (endIdx > startIdx) {
-      var midPool = pool.sublist(startIdx, endIdx);
-      double midAvgSpeed = midPool.map((d) => d.speedMS).reduce((a, b) => a + b) / midPool.length;
-      
-      double totalDeviation = 0.0;
-      for (var d in midPool) totalDeviation += (d.speedMS - midAvgSpeed).abs();
-      double avgDeviation = totalDeviation / midPool.length;
+    // 3. Constant speed analysis
+    final startIdx = (pool.length * 0.2).floor();
+    final endIdx = (pool.length * 0.8).floor();
+    if (endIdx > startIdx && endIdx <= pool.length) {
+      final midPool = pool.sublist(startIdx, endIdx);
+      final midAvgSpeed = midPool.map((d) => d.speedMS).reduce((a, b) => a + b) / midPool.length;
+      double totalDev = 0.0;
+      for (final d in midPool) { totalDev += (d.speedMS - midAvgSpeed).abs(); }
+      final avgDeviation = totalDev / midPool.length;
 
       if (avgDeviation > 0.08) {
-        score -= (avgDeviation * 80); 
-        feedback.add('Cruising speed varied (±${avgDeviation.toStringAsFixed(2)} m/s deviation).');
-      } else {
-        feedback.add('Great steady cruising speed of ${midAvgSpeed.toStringAsFixed(2)} m/s.');
+        score -= (avgDeviation * 80);
+        feedback.add('Cruising speed varied. Try to keep your forward speed steadier.');
       }
     }
+
+    // 4. FIX: TILT SENSITIVITY (Using Max Pitch)
+    if (maxPitch > 3.5) {
+      score -= ((maxPitch - 3.0) * 7.0).clamp(0, 25);
+      if (maxPitch > 7.0) {
+        feedback.add('Significant tilt detected! Lean forward to keep casters grounded.');
+      } else {
+        feedback.add('Slight tilt detected. Focus on a stable, forward posture.');
+      }
+    } 
     
     return TestEvaluation(score.clamp(0, 100).round(), feedback);
   },

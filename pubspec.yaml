@@ -16,6 +16,8 @@ dependencies:
   path_provider: ^2.1.5
   share_plus: ^10.1.2
   cross_file: ^0.3.4+2
+  shared_preferences: ^2.5.5
+  flutter_native_splash: ^2.4.7
 
 dev_dependencies:
   flutter_test:
@@ -37,9 +39,18 @@ flutter:
     - assets/images/wheeling_backward3.png
     - assets/images/wheeling_on_spot.png
     - assets/icons/logo.png
+    - assets/icons/splashlogo.png
 
 
 flutter_icons:
   android: true
   ios: true
   image_path: assets/icons/logo.png
+
+flutter_native_splash:
+  color: "#F6F7FB"
+  image: assets/icons/logo.png
+  # This line tells Android 12+ to use the image properly:
+  android_12:
+    image: assets/icons/logo.png
+    icon_background_color: "#F6F7FB"

@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'esp32_service.dart';
 import 'models.dart';
@@ -53,7 +55,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   int _currentIndex = 0;
 
+  // --- USER PROFILE STATE ---
+  String userName = "User";
+  int selectedAvatarIndex = 0;
+  final List<String> avatarImages = ['🐶', '🐱', '🐼']; 
+  
+  final TextEditingController _nameController = TextEditingController();
+
   bool demoMode = false;
+  bool unlockAllLevels = false; 
   String baseUrl = 'http://192.168.4.1';
   int pollingMs = 150; 
   int testDurationSetting = 10;
@@ -77,14 +87,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   HistoryTimeframe _selectedHistoryTimeframe = HistoryTimeframe.today;
 
   final maneuvers = appManeuvers;
-
-  // FIX 1: Add a ScrollController for the Training Page
   final ScrollController _trainingScrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
     esp = Esp32Service(baseUrl: baseUrl);
+    _loadSavedData();
     _startPolling();
   }
 
@@ -93,8 +102,92 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _pollTimer?.cancel();
     _sessionTimer?.cancel();
     _countdownTimer?.cancel();
-    _trainingScrollController.dispose(); // Always dispose controllers!
+    _trainingScrollController.dispose();
+    _nameController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadSavedData() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      userName = prefs.getString('userName') ?? "User";
+      _nameController.text = userName == "User" ? "" : userName;
+      
+      selectedAvatarIndex = prefs.getInt('selectedAvatarIndex') ?? 0;
+      unlockAllLevels = prefs.getBool('unlockAllLevels') ?? false;
+      testDurationSetting = prefs.getInt('testDurationSetting') ?? 10;
+
+      final historyJsonList = prefs.getStringList('sessionHistory');
+      if (historyJsonList != null) {
+        sessionHistory.clear();
+        for (var item in historyJsonList) {
+          try {
+            final map = jsonDecode(item);
+            sessionHistory.add(SessionResult(
+              name: map['name'],
+              score: map['score'],
+              date: DateTime.parse(map['date']),
+              duration: Duration(seconds: map['duration']),
+              feedback: List<String>.from(map['feedback']),
+            ));
+          } catch (e) {
+            debugPrint("Failed to load a history item: $e");
+          }
+        }
+      }
+    });
+  }
+
+  Future<void> _saveProfile() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('userName', userName);
+    await prefs.setInt('selectedAvatarIndex', selectedAvatarIndex);
+  }
+
+  Future<void> _saveSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('unlockAllLevels', unlockAllLevels);
+    await prefs.setInt('testDurationSetting', testDurationSetting);
+  }
+
+  Future<void> _saveHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    final historyStrings = sessionHistory.map((r) => jsonEncode({
+      'name': r.name,
+      'score': r.score,
+      'date': r.date.toIso8601String(),
+      'duration': r.duration.inSeconds,
+      'feedback': r.feedback,
+    })).toList();
+    await prefs.setStringList('sessionHistory', historyStrings);
+  }
+
+  void _confirmClearHistory() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear All History?', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+        content: const Text('Are you sure you want to permanently delete all your training data and scores? This cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              setState(() => sessionHistory.clear());
+              _saveHistory();
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('All training history cleared.')),
+              );
+            },
+            child: const Text('Yes, Delete'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _startPolling() {
@@ -142,7 +235,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _initiateTest(Maneuver maneuver) {
-    // FIX 1: Scroll to the top when the test is initiated
     if (_trainingScrollController.hasClients) {
       _trainingScrollController.animateTo(
         0.0,
@@ -218,6 +310,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
 
         sessionHistory.insert(0, result);
+        _saveHistory();
         _showFeedbackDialog(result);
       }
     }
@@ -247,23 +340,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return sessionHistory.where((session) {
       final date = session.date;
-
       switch (_selectedHistoryTimeframe) {
         case HistoryTimeframe.today:
-          return date.year == now.year &&
-              date.month == now.month &&
-              date.day == now.day;
-
+          return date.year == now.year && date.month == now.month && date.day == now.day;
         case HistoryTimeframe.week:
           final startOfToday = DateTime(now.year, now.month, now.day);
           final startOfRange = startOfToday.subtract(const Duration(days: 6));
           final sessionDay = DateTime(date.year, date.month, date.day);
-          return !sessionDay.isBefore(startOfRange) &&
-              !sessionDay.isAfter(startOfToday);
-
+          return !sessionDay.isBefore(startOfRange) && !sessionDay.isAfter(startOfToday);
         case HistoryTimeframe.month:
           return date.year == now.year && date.month == now.month;
-
         case HistoryTimeframe.allTime:
           return true;
       }
@@ -272,14 +358,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   String _historyLabel(HistoryTimeframe timeframe) {
     switch (timeframe) {
-      case HistoryTimeframe.today:
-        return 'Today';
-      case HistoryTimeframe.week:
-        return 'Week';
-      case HistoryTimeframe.month:
-        return 'Month';
-      case HistoryTimeframe.allTime:
-        return 'All Time';
+      case HistoryTimeframe.today: return 'Today';
+      case HistoryTimeframe.week: return 'Week';
+      case HistoryTimeframe.month: return 'Month';
+      case HistoryTimeframe.allTime: return 'All Time';
     }
   }
 
@@ -292,26 +374,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   String _formatSummaryDuration(Duration d) {
-    if (d.inSeconds < 60) {
-      return '${d.inSeconds}s';
-    }
-
+    if (d.inSeconds < 60) return '${d.inSeconds}s';
     final totalMinutes = d.inMinutes;
     final hours = totalMinutes ~/ 60;
     final minutes = totalMinutes % 60;
 
-    if (hours > 0 && minutes > 0) {
-      return '${hours}h ${minutes}m';
-    }
-    if (hours > 0) {
-      return '${hours}h';
-    }
+    if (hours > 0 && minutes > 0) return '${hours}h ${minutes}m';
+    if (hours > 0) return '${hours}h';
     return '${minutes}m';
   }
 
-  int _getTotalPracticeSessions() {
-    return sessionHistory.length;
-  }
+  int _getTotalPracticeSessions() => sessionHistory.length;
 
   int _getAverageScore() {
     if (sessionHistory.isEmpty) return 0;
@@ -343,33 +416,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
     buffer.writeln('Date,Time,Test Name,Duration(s),Score,Feedback');
 
     for (final trip in historyToExport) {
-      final dateStr =
-          '${trip.date.year}-${trip.date.month.toString().padLeft(2, '0')}-${trip.date.day.toString().padLeft(2, '0')}';
-      final timeStr =
-          '${trip.date.hour.toString().padLeft(2, '0')}:${trip.date.minute.toString().padLeft(2, '0')}';
-      final feedbackJoined =
-          trip.feedback.isNotEmpty ? trip.feedback.join(' | ') : 'None';
+      final dateStr = '${trip.date.year}-${trip.date.month.toString().padLeft(2, '0')}-${trip.date.day.toString().padLeft(2, '0')}';
+      final timeStr = '${trip.date.hour.toString().padLeft(2, '0')}:${trip.date.minute.toString().padLeft(2, '0')}';
+      final feedbackJoined = trip.feedback.isNotEmpty ? trip.feedback.join(' | ') : 'None';
 
-      buffer.writeln(
-        [
-          _escapeCsv(dateStr),
-          _escapeCsv(timeStr),
-          _escapeCsv(trip.name),
-          trip.duration.inSeconds,
-          trip.score,
-          _escapeCsv(feedbackJoined),
-        ].join(','),
-      );
+      buffer.writeln([
+        _escapeCsv(dateStr), _escapeCsv(timeStr), _escapeCsv(trip.name),
+        trip.duration.inSeconds, trip.score, _escapeCsv(feedbackJoined),
+      ].join(','));
     }
 
     try {
       final dir = await getApplicationDocumentsDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final timeframeLabel = _historyLabel(_selectedHistoryTimeframe)
-          .toLowerCase()
-          .replaceAll(' ', '_');
-      final file =
-          File('${dir.path}/wheelchair_history_${timeframeLabel}_$timestamp.csv');
+      final timeframeLabel = _historyLabel(_selectedHistoryTimeframe).toLowerCase().replaceAll(' ', '_');
+      final file = File('${dir.path}/wheelchair_history_${timeframeLabel}_$timestamp.csv');
 
       await file.writeAsString(buffer.toString());
 
@@ -381,19 +442,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'CSV created on your phone. Use the share sheet to save or send it.',
-          ),
-        ),
+        const SnackBar(content: Text('CSV created on your phone. Use the share sheet to save or send it.')),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to export CSV: $e'),
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to export CSV: $e')));
     }
   }
 
@@ -433,16 +486,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
               style: TextStyle(
                 fontSize: 48,
                 fontWeight: FontWeight.w900,
-                color: result.score >= 80
-                    ? Colors.green
-                    : (result.score >= 50 ? Colors.orange : Colors.red),
+                color: result.score >= 80 ? Colors.green : (result.score >= 50 ? Colors.orange : Colors.red),
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
-              'Performance Feedback:',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
+            const Text('Performance Feedback:', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             ...result.feedback.map(
               (f) => Padding(
@@ -451,27 +499,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Icon(
-                      f.contains('Excellent') ||
-                              f.contains('Great') ||
-                              f.contains('Good') ||
-                              f.contains('Perfect')
-                          ? Icons.check_circle
-                          : Icons.warning_amber_rounded,
-                      color: f.contains('Excellent') ||
-                              f.contains('Great') ||
-                              f.contains('Good') ||
-                              f.contains('Perfect')
-                          ? Colors.green
-                          : Colors.orange,
+                      f.contains('Excellent') || f.contains('Great') || f.contains('Good') || f.contains('Perfect')
+                          ? Icons.check_circle : Icons.warning_amber_rounded,
+                      color: f.contains('Excellent') || f.contains('Great') || f.contains('Good') || f.contains('Perfect')
+                          ? Colors.green : Colors.orange,
                       size: 20,
                     ),
                     const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        f,
-                        style: const TextStyle(fontSize: 14),
-                      ),
-                    ),
+                    Expanded(child: Text(f, style: const TextStyle(fontSize: 14))),
                   ],
                 ),
               ),
@@ -488,6 +523,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  // ==========================================
+  // CUSTOM SPLASH SCREEN LOGIC
+  // ==========================================
+  Widget _buildSplash() {
+    return Container(
+      color: const Color(0xFFF6F7FB), // Matches the app's clean background
+      alignment: Alignment.center,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // The new logo is loaded here!
+          Image.asset(
+            'assets/icons/splashlogo.png',
+            width: MediaQuery.of(context).size.width * 0.5, // Perfect 50% scale
+            fit: BoxFit.contain,
+            errorBuilder: (context, error, stackTrace) => const Icon(
+              Icons.wheelchair_pickup_rounded,
+              size: 150,
+              color: Colors.indigo,
+            ),
+          ),
+          const SizedBox(height: 60),
+          const CircularProgressIndicator(color: Colors.indigo),
+          const SizedBox(height: 20),
+          Text(
+            'Connecting to Wheelchair...',
+            style: TextStyle(
+              fontSize: 16, 
+              fontWeight: FontWeight.w600, 
+              color: Colors.indigo.shade300
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = [
@@ -498,37 +570,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
     ];
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('WheelSense'),
+      appBar: loading ? null : AppBar(
+        title: const Text('WheelSense', style: TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: true,
+        elevation: 0,
       ),
-      body: loading
-          ? const Center(child: CircularProgressIndicator())
-          : pages[_currentIndex],
-      bottomNavigationBar: NavigationBar(
+      body: loading ? _buildSplash() : pages[_currentIndex],
+      bottomNavigationBar: loading ? null : NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (v) => setState(() => _currentIndex = v),
         destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.dashboard_outlined),
-            selectedIcon: Icon(Icons.dashboard),
-            label: 'Live',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.play_circle_outline),
-            selectedIcon: Icon(Icons.play_circle),
-            label: 'Testing',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.history_outlined),
-            selectedIcon: Icon(Icons.history),
-            label: 'History',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
-            label: 'Settings',
-          ),
+          NavigationDestination(icon: Icon(Icons.dashboard_outlined), selectedIcon: Icon(Icons.dashboard), label: 'Live'),
+          NavigationDestination(icon: Icon(Icons.play_circle_outline), selectedIcon: Icon(Icons.play_circle), label: 'Training'),
+          NavigationDestination(icon: Icon(Icons.history_outlined), selectedIcon: Icon(Icons.history), label: 'History'),
+          NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
     );
@@ -546,15 +601,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           Card(
-            child: ListTile(
-              leading: Icon(
-                connected ? Icons.wifi : Icons.wifi_off,
-                color: connected ? Colors.green : Colors.red,
+            color: Colors.indigo.shade600,
+            child: Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 32,
+                    backgroundColor: Colors.white,
+                    child: Text(avatarImages[selectedAvatarIndex], style: const TextStyle(fontSize: 36)),
+                  ),
+                  const SizedBox(width: 20),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Welcome back,',
+                          style: TextStyle(fontSize: 16, color: Colors.indigo.shade100),
+                        ),
+                        Text(
+                          userName.isEmpty ? 'User' : userName,
+                          style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, color: Colors.white),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              title: Text(
-                connected ? 'Connected to ESP32' : 'Disconnected',
-              ),
-              subtitle: Text(baseUrl),
             ),
           ),
           const SizedBox(height: 16),
@@ -576,32 +651,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const Divider(),
-                  _DataRow(
-                    label: 'Speed',
-                    value: '${wheelData.speedMS.toStringAsFixed(2)} m/s',
-                  ),
-                  _DataRow(
-                    label: 'Encoder Diff',
-                    value: wheelData.rpmDiff.toStringAsFixed(2),
-                  ),
-                  _DataRow(
-                    label: 'Yaw Rate (Turn)',
-                    value: '${wheelData.yawRateDps.toStringAsFixed(2)} deg/s',
-                  ),
-                  _DataRow(
-                    label: 'Pitch (Tilt)',
-                    value: '${wheelData.pitchDeg.toStringAsFixed(2)} deg',
-                  ),
+                  _DataRow(label: 'Speed', value: '${wheelData.speedMS.toStringAsFixed(2)} m/s'),
+                  _DataRow(label: 'Encoder Diff', value: wheelData.rpmDiff.toStringAsFixed(2)),
+                  _DataRow(label: 'Yaw Rate (Turn)', value: '${wheelData.yawRateDps.toStringAsFixed(2)} deg/s'),
+                  _DataRow(label: 'Pitch (Tilt)', value: '${wheelData.pitchDeg.toStringAsFixed(2)} deg'),
                   _DataRow(label: 'Motion', value: wheelData.motion),
                   _DataRow(label: 'IMU State', value: wheelData.imuMotionState),
-                  _DataRow(
-                    label: 'Right Wheel',
-                    value: wheelData.signedR.toStringAsFixed(2),
-                  ),
-                  _DataRow(
-                    label: 'Left Wheel',
-                    value: wheelData.signedL.toStringAsFixed(2),
-                  ),
+                  _DataRow(label: 'Right Wheel', value: wheelData.signedR.toStringAsFixed(2)),
+                  _DataRow(label: 'Left Wheel', value: wheelData.signedL.toStringAsFixed(2)),
                 ],
               ),
             ),
@@ -611,109 +668,135 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  void _showManeuverBottomSheet(Maneuver maneuver) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _ManeuverBottomSheet(
+        maneuver: maneuver,
+        testDurationSetting: testDurationSetting,
+        onStart: () {
+          Navigator.pop(context); 
+          _initiateTest(maneuver); 
+        },
+      ),
+    );
+  }
+
   Widget _buildTrainingPage() {
-    return ListView(
-      // FIX 1: Attach the ScrollController here
-      controller: _trainingScrollController, 
-      padding: const EdgeInsets.all(16),
+    return Stack(
+      fit: StackFit.expand,
       children: [
-        if (selectedManeuver != null) ...[
-          Card(
-            color: isCountingDown
-                ? const Color.fromARGB(255, 122, 136, 229)
-                : Colors.indigo.shade50,
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                children: [
-                  Text(
-                    selectedManeuver!.name,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  if (isCountingDown) ...[
-                    const Text(
-                      'GET READY...',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                    Text(
-                      '$countdownValue',
-                      style: const TextStyle(
-                        fontSize: 72,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ] else ...[
-                    const Text(
-                      'SENSING ACTIVE',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.indigo,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      _fmt(sessionRemaining),
-                      style: const TextStyle(
-                        fontSize: 48,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'remaining',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey.shade700,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    LinearProgressIndicator(
-                      value: testDurationSetting == 0
-                          ? 0
-                          : sessionRemaining.inSeconds / testDurationSetting,
-                      minHeight: 12,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                  ],
-                  const SizedBox(height: 20),
-                  OutlinedButton.icon(
-                    onPressed: _cancelTestEarly,
-                    icon: const Icon(Icons.cancel),
-                    label: const Text('Cancel Test'),
-                  ),
-                ],
+        ListView(
+          controller: _trainingScrollController,
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          children: [
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16.0),
+              child: Text(
+                'Training Progression',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
               ),
             ),
-          ),
-          const SizedBox(height: 16),
-        ],
-        const Text(
-          'Select a Maneuver to Test',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            const SizedBox(height: 32),
+            CustomPaint(
+              painter: _SkillTreePainter(count: maneuvers.length),
+              child: Column(
+                children: List.generate(maneuvers.length, (index) {
+                  final maneuver = maneuvers[index];
+
+                  int level = 1; 
+                  if (index >= 5 && index <= 6) level = 2; 
+                  if (index >= 7) level = 3; 
+
+                  bool isUnlocked = index == 0 || unlockAllLevels;
+                  if (!isUnlocked && index > 0) {
+                    final prevName = maneuvers[index - 1].name;
+                    isUnlocked = sessionHistory.any((s) => s.name == prevName && s.score >= 80);
+                  }
+
+                  bool hasPassed = sessionHistory.any((s) => s.name == maneuver.name && s.score >= 80);
+
+                  double shiftX = 0;
+                  if (index % 4 == 1) shiftX = -70;
+                  if (index % 4 == 3) shiftX = 70;
+
+                  return Container(
+                    height: 145, 
+                    alignment: Alignment.center,
+                    child: Transform.translate(
+                      offset: Offset(shiftX, 0),
+                      child: _SkillNode(
+                        maneuver: maneuver,
+                        isUnlocked: isUnlocked,
+                        hasPassed: hasPassed,
+                        level: level, 
+                        onTap: () {
+                          if (isUnlocked) {
+                            _showManeuverBottomSheet(maneuver);
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('🔒 Score 80+ on the previous skill to unlock!'),
+                                duration: Duration(seconds: 2),
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 12),
-        for (final maneuver in maneuvers)
-          Padding(
-            // FIX 2: Give the wrapper a specific ValueKey
-            key: ValueKey(maneuver.name), 
-            padding: const EdgeInsets.only(bottom: 12),
-            child: _InteractiveManeuverCard(
-              // FIX 2: Give the actual widget a specific ValueKey
-              key: ValueKey('${maneuver.name}_card'), 
-              maneuver: maneuver,
-              isBusy: isCountingDown || sessionRunning,
-              testDurationSetting: testDurationSetting,
-              onStart: () => _initiateTest(maneuver),
+
+        if (selectedManeuver != null)
+          Container(
+            color: Colors.black.withOpacity(0.7),
+            alignment: Alignment.center,
+            padding: const EdgeInsets.all(24),
+            child: Card(
+              color: isCountingDown ? const Color.fromARGB(255, 122, 136, 229) : Colors.indigo.shade50,
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min, 
+                  children: [
+                    Text(
+                      selectedManeuver!.name,
+                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 20),
+                    if (isCountingDown) ...[
+                      const Text('GET READY...', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+                      Text('$countdownValue', style: const TextStyle(fontSize: 72, fontWeight: FontWeight.w900)),
+                    ] else ...[
+                      const Text('SENSING ACTIVE', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.indigo)),
+                      const SizedBox(height: 10),
+                      Text(_fmt(sessionRemaining), style: const TextStyle(fontSize: 48, fontWeight: FontWeight.w900)),
+                      const SizedBox(height: 6),
+                      Text('remaining', style: TextStyle(fontSize: 14, color: Colors.grey.shade700, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 10),
+                      LinearProgressIndicator(
+                        value: testDurationSetting == 0 ? 0 : sessionRemaining.inSeconds / testDurationSetting,
+                        minHeight: 12,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    OutlinedButton.icon(
+                      onPressed: _cancelTestEarly,
+                      icon: const Icon(Icons.cancel),
+                      label: const Text('Cancel Test'),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
       ],
@@ -731,15 +814,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text(
-              'Test Records',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            OutlinedButton.icon(
-              onPressed: _exportHistoryToPhone,
-              icon: const Icon(Icons.download),
-              label: const Text('Export CSV'),
-            ),
+            const Text('Test Records', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            OutlinedButton.icon(onPressed: _exportHistoryToPhone, icon: const Icon(Icons.download), label: const Text('Export CSV')),
           ],
         ),
         const SizedBox(height: 12),
@@ -753,11 +829,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: ChoiceChip(
                   label: Text(_historyLabel(timeframe)),
                   selected: selected,
-                  onSelected: (_) {
-                    setState(() {
-                      _selectedHistoryTimeframe = timeframe;
-                    });
-                  },
+                  onSelected: (_) => setState(() => _selectedHistoryTimeframe = timeframe),
                 ),
               );
             }).toList(),
@@ -766,76 +838,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
         const SizedBox(height: 16),
         Row(
           children: [
-            Expanded(
-              child: _HistoryStatCard(
-                title: 'Total Sessions',
-                value: '$totalSessions',
-              ),
-            ),
+            Expanded(child: _HistoryStatCard(title: 'Total Sessions', value: '$totalSessions')),
             const SizedBox(width: 12),
-            Expanded(
-              child: _HistoryStatCard(
-                title: 'Total Time',
-                value: _formatSummaryDuration(totalDuration),
-              ),
-            ),
+            Expanded(child: _HistoryStatCard(title: 'Total Time', value: _formatSummaryDuration(totalDuration))),
           ],
         ),
         const SizedBox(height: 16),
         if (filteredHistory.isEmpty)
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32.0),
-              child: Text(
-                'No test records for ${_historyLabel(_selectedHistoryTimeframe).toLowerCase()}.',
-              ),
-            ),
-          )
+          Center(child: Padding(padding: const EdgeInsets.all(32.0), child: Text('No test records for ${_historyLabel(_selectedHistoryTimeframe).toLowerCase()}.')))
         else
           ...filteredHistory.map(
             (trip) => Card(
               margin: const EdgeInsets.only(bottom: 12),
               child: ExpansionTile(
                 leading: CircleAvatar(
-                  backgroundColor: trip.score >= 80
-                      ? Colors.green.shade100
-                      : (trip.score >= 50
-                          ? Colors.orange.shade100
-                          : Colors.red.shade100),
-                  child: Text(
-                    '${trip.score}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
+                  backgroundColor: trip.score >= 80 ? Colors.green.shade100 : (trip.score >= 50 ? Colors.orange.shade100 : Colors.red.shade100),
+                  child: Text('${trip.score}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87)),
                 ),
-                title: Text(
-                  trip.name,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                subtitle: Text(
-                  '${trip.date.month}/${trip.date.day} at ${trip.date.hour}:${trip.date.minute.toString().padLeft(2, '0')} • ${_fmt(trip.duration)}',
-                ),
+                title: Text(trip.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text('${trip.date.month}/${trip.date.day} at ${trip.date.hour}:${trip.date.minute.toString().padLeft(2, '0')} • ${_fmt(trip.duration)}'),
                 children: [
                   Padding(
                     padding: const EdgeInsets.all(16.0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      children: trip.feedback
-                          .map(
-                            (f) => Padding(
-                              padding: const EdgeInsets.only(bottom: 6.0),
-                              child: Text(
-                                '• $f',
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.black87,
-                                ),
-                              ),
-                            ),
-                          )
-                          .toList(),
+                      children: trip.feedback.map(
+                            (f) => Padding(padding: const EdgeInsets.only(bottom: 6.0), child: Text('• $f', style: const TextStyle(fontSize: 14, color: Colors.black87))),
+                          ).toList(),
                     ),
                   ),
                 ],
@@ -851,38 +880,133 @@ class _DashboardScreenState extends State<DashboardScreen> {
       padding: const EdgeInsets.all(16),
       children: [
         Card(
+          child: ListTile(
+            leading: Icon(
+              connected ? Icons.wifi : Icons.wifi_off,
+              color: connected ? Colors.green : Colors.red,
+              size: 32,
+            ),
+            title: Text(connected ? 'Hardware Connected' : 'Hardware Disconnected', style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: Text('IP: $baseUrl'),
+          ),
+        ),
+        const SizedBox(height: 16),
+        
+        Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Testing Parameters',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                const Text('User Profile', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Divider(),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Your Name',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.person),
+                  ),
                 ),
+                const SizedBox(height: 24),
+                const Text('Select an Avatar:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: List.generate(avatarImages.length, (index) {
+                    bool isSelected = selectedAvatarIndex == index;
+                    return GestureDetector(
+                      onTap: () {
+                        setState(() => selectedAvatarIndex = index);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: isSelected ? Colors.indigo : Colors.transparent,
+                            width: 4,
+                          ),
+                        ),
+                        child: CircleAvatar(
+                          radius: 36,
+                          backgroundColor: Colors.indigo.shade50,
+                          child: Text(avatarImages[index], style: const TextStyle(fontSize: 40)),
+                        ),
+                      ),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () {
+                      setState(() {
+                        userName = _nameController.text.trim().isEmpty ? "User" : _nameController.text.trim();
+                      });
+                      _saveProfile();
+                      FocusScope.of(context).unfocus();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Profile saved successfully!')),
+                      );
+                    },
+                    child: const Text('Save Profile'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Testing Parameters', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 const Divider(),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
-                      'Test Duration (seconds):',
-                      style: TextStyle(fontSize: 16),
-                    ),
+                    const Text('Test Duration (seconds):', style: TextStyle(fontSize: 16)),
                     DropdownButton<int>(
                       value: testDurationSetting,
-                      items: [5, 10, 15, 20].map((int value) {
-                        return DropdownMenuItem<int>(
-                          value: value,
-                          child: Text('$value s'),
-                        );
-                      }).toList(),
+                      items: [5, 10, 15, 20].map((int value) => DropdownMenuItem<int>(value: value, child: Text('$value s'))).toList(),
                       onChanged: (newValue) {
                         if (newValue != null) {
                           setState(() => testDurationSetting = newValue);
+                          _saveSettings();
                         }
                       },
                     ),
                   ],
+                ),
+                const SizedBox(height: 16),
+                const Text('Capstone Demo Settings', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Divider(),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Unlock All Map Nodes', style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: const Text('Instantly overrides locks for presentation.'),
+                  value: unlockAllLevels,
+                  onChanged: (val) {
+                    setState(() => unlockAllLevels = val);
+                    _saveSettings();
+                  },
+                ),
+                const SizedBox(height: 16),
+                const Text('Data Management', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Divider(),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.delete_forever, color: Colors.red),
+                  title: const Text('Clear Training History', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Permanently delete all scores and progression.'),
+                  onTap: _confirmClearHistory,
                 ),
               ],
             ),
@@ -893,14 +1017,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 }
 
+// ---------------------------------------------------------
+// REUSABLE WIDGETS & PAINTERS FOR THE SKILL TREE
+// ---------------------------------------------------------
+
 class _DataRow extends StatelessWidget {
   final String label;
   final String value;
-
-  const _DataRow({
-    required this.label,
-    required this.value,
-  });
+  const _DataRow({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
@@ -920,11 +1044,7 @@ class _DataRow extends StatelessWidget {
 class _HistoryStatCard extends StatelessWidget {
   final String title;
   final String value;
-
-  const _HistoryStatCard({
-    required this.title,
-    required this.value,
-  });
+  const _HistoryStatCard({required this.title, required this.value});
 
   @override
   Widget build(BuildContext context) {
@@ -934,23 +1054,9 @@ class _HistoryStatCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey.shade600,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
+            Text(title, style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w500)),
             const SizedBox(height: 8),
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w900,
-                color: Colors.cyan,
-              ),
-            ),
+            Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.cyan)),
           ],
         ),
       ),
@@ -958,26 +1064,149 @@ class _HistoryStatCard extends StatelessWidget {
   }
 }
 
-class _InteractiveManeuverCard extends StatefulWidget {
+class _SkillNode extends StatelessWidget {
   final Maneuver maneuver;
-  final bool isBusy;
+  final bool isUnlocked;
+  final bool hasPassed;
+  final int level; 
+  final VoidCallback onTap;
+
+  const _SkillNode({
+    required this.maneuver,
+    required this.isUnlocked,
+    required this.hasPassed,
+    required this.level,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    Color levelColor = Colors.indigo.shade400; 
+    if (level == 2) levelColor = Colors.teal.shade500; 
+    if (level == 3) levelColor = Colors.deepPurple.shade500; 
+
+    Color nodeColor = hasPassed ? Colors.amber.shade500 : (isUnlocked ? levelColor : Colors.grey.shade300);
+    IconData icon = hasPassed ? Icons.star_rounded : (isUnlocked ? Icons.play_arrow_rounded : Icons.lock_rounded);
+
+    BoxShape shape = BoxShape.circle;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: nodeColor,
+              shape: shape,
+              boxShadow: isUnlocked ? [
+                BoxShadow(color: nodeColor.withOpacity(0.4), blurRadius: 10, offset: const Offset(0, 6))
+              ] : null,
+              border: Border.all(color: Colors.white, width: 4),
+            ),
+            child: Icon(icon, color: Colors.white, size: 40),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: isUnlocked ? Colors.white : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: isUnlocked ? [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4)] : null,
+            ),
+            child: Text(
+              maneuver.name,
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: isUnlocked ? Colors.black87 : Colors.grey.shade500),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SkillTreePainter extends CustomPainter {
+  final int count;
+  _SkillTreePainter({required this.count});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double rowHeight = 145.0;
+    final double center = size.width / 2;
+
+    final linePaint = Paint()..color = Colors.grey.shade300..strokeWidth = 2;
+    
+    void drawLevelLine(double y, String text, Color textColor) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), linePaint);
+      final textSpan = TextSpan(
+        text: text,
+        style: TextStyle(color: textColor.withOpacity(0.6), fontWeight: FontWeight.w900, letterSpacing: 3, fontSize: 14),
+      );
+      final textPainter = TextPainter(text: textSpan, textDirection: TextDirection.ltr);
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(16, y - 10)); 
+    }
+
+    drawLevelLine(10, 'BEGINNER', Colors.indigo.shade400);           
+    drawLevelLine(5 * rowHeight, 'INTERMEDIATE', Colors.teal.shade500);  
+    drawLevelLine(7 * rowHeight, 'ADVANCED', Colors.deepPurple.shade500);
+
+    final pathPaint = Paint()
+      ..color = Colors.grey.shade300
+      ..strokeWidth = 12
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    Path path = Path();
+    for (int i = 0; i < count; i++) {
+      double shiftX = 0;
+      if (i % 4 == 1) shiftX = -70;
+      if (i % 4 == 3) shiftX = 70;
+
+      double x = center + shiftX;
+      double y = (i * rowHeight) + (rowHeight / 2) - 10;
+
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        double prevShiftX = 0;
+        if ((i - 1) % 4 == 1) prevShiftX = -70;
+        if ((i - 1) % 4 == 3) prevShiftX = 70;
+        double prevX = center + prevShiftX;
+        double prevY = ((i - 1) * rowHeight) + (rowHeight / 2) - 10;
+
+        path.cubicTo(
+          prevX, prevY + 65,
+          x, y - 65,
+          x, y,
+        );
+      }
+    }
+    canvas.drawPath(path, pathPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _ManeuverBottomSheet extends StatefulWidget {
+  final Maneuver maneuver;
   final int testDurationSetting;
   final VoidCallback onStart;
 
-  const _InteractiveManeuverCard({
-    super.key, // FIX 2: Need to pass the key down to the superclass
+  const _ManeuverBottomSheet({
     required this.maneuver,
-    required this.isBusy,
     required this.testDurationSetting,
     required this.onStart,
   });
 
   @override
-  State<_InteractiveManeuverCard> createState() =>
-      _InteractiveManeuverCardState();
+  State<_ManeuverBottomSheet> createState() => _ManeuverBottomSheetState();
 }
 
-class _InteractiveManeuverCardState extends State<_InteractiveManeuverCard> {
+class _ManeuverBottomSheetState extends State<_ManeuverBottomSheet> {
   int currentStepIndex = 0;
 
   @override
@@ -988,97 +1217,68 @@ class _InteractiveManeuverCardState extends State<_InteractiveManeuverCard> {
     final step = widget.maneuver.steps[currentStepIndex];
     final isLastStep = currentStepIndex == widget.maneuver.steps.length - 1;
 
-    return Card(
-      child: ExpansionTile(
-        // FIX 2: Ensuring ExpansionTile specifically maintains state 
-        key: PageStorageKey(widget.maneuver.name),
-        title: Text(
-          widget.maneuver.name,
-          style: const TextStyle(fontWeight: FontWeight.w700),
-        ),
-        subtitle: const Text('Tap to view step-by-step instructions'),
-        onExpansionChanged: (expanded) {
-          if (!expanded) {
-            setState(() => currentStepIndex = 0);
-          }
-        },
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.only(
+        left: 24, 
+        right: 24, 
+        top: 24, 
+        bottom: MediaQuery.of(context).padding.bottom + 24
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Step ${currentStepIndex + 1} of ${widget.maneuver.steps.length}',
-                  style: TextStyle(
-                    color: Colors.indigo.shade400,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                if (step.imagePath != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16.0),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.asset(
-                        step.imagePath!,
-                        height: 180,
-                        width: double.infinity,
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stackTrace) => Container(
-                          height: 180,
-                          color: Colors.grey.shade200,
-                          child: const Center(
-                            child: Text('Image not found. Check pubspec.yaml!'),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                Text(
-                  step.title,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  step.text,
-                  style: const TextStyle(fontSize: 16, height: 1.4),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    TextButton.icon(
-                      onPressed: currentStepIndex == 0
-                          ? null
-                          : () => setState(() => currentStepIndex--),
-                      icon: const Icon(Icons.arrow_back),
-                      label: const Text('Back'),
-                    ),
-                    if (!isLastStep)
-                      FilledButton.icon(
-                        onPressed: () => setState(() => currentStepIndex++),
-                        icon: const Icon(Icons.arrow_forward),
-                        label: const Text('Next'),
-                      )
-                    else
-                      FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: Colors.green.shade600,
-                        ),
-                        onPressed: widget.isBusy ? null : widget.onStart,
-                        icon: const Icon(Icons.play_arrow),
-                        label:
-                            Text('Start ${widget.testDurationSetting}s Test'),
-                      ),
-                  ],
-                ),
-              ],
+          Center(
+            child: Container(
+              width: 40, height: 5,
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)),
             ),
+          ),
+          Text(widget.maneuver.name, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900), textAlign: TextAlign.center),
+          const SizedBox(height: 20),
+          Text('Step ${currentStepIndex + 1} of ${widget.maneuver.steps.length}', style: TextStyle(color: Colors.indigo.shade400, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          if (step.imagePath != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16.0),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.asset(
+                  step.imagePath!,
+                  height: 180,
+                  width: double.infinity,
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stackTrace) => Container(
+                    height: 180, color: Colors.grey.shade200,
+                    child: const Center(child: Text('Image not found. Check pubspec.yaml!')),
+                  ),
+                ),
+              ),
+            ),
+          Text(step.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+          const SizedBox(height: 8),
+          Text(step.text, style: const TextStyle(fontSize: 16, height: 1.4)),
+          const SizedBox(height: 32),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              TextButton.icon(
+                onPressed: currentStepIndex == 0 ? null : () => setState(() => currentStepIndex--),
+                icon: const Icon(Icons.arrow_back), label: const Text('Back'),
+              ),
+              if (!isLastStep)
+                FilledButton.icon(onPressed: () => setState(() => currentStepIndex++), icon: const Icon(Icons.arrow_forward), label: const Text('Next'))
+              else
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(backgroundColor: Colors.green.shade600, padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12)),
+                  onPressed: widget.onStart, icon: const Icon(Icons.play_arrow), label: Text('Start ${widget.testDurationSetting}s Test'),
+                ),
+            ],
           ),
         ],
       ),

@@ -31,34 +31,36 @@ final turnRightBackwardManeuver = Maneuver(
     double avgYawRate = pool.map((d) => d.yawRateDps).reduce((a, b) => a + b) / pool.length;
     double avgAbsYawRate = pool.map((d) => d.yawRateDps.abs()).reduce((a, b) => a + b) / pool.length;
     double wobble = pool.map((d) => (d.yawRateDps - avgYawRate).abs()).reduce((a, b) => a + b) / pool.length;
-
     final maxPitch = pool.map((d) => d.pitchDeg.abs()).reduce((a, b) => a > b ? a : b);
 
-    // 1. TURN DETECTION (Right Backward is POSITIVE Yaw Rate)
-    if (avgYawRate <= 1.0) {
-      score -= 30;
-      feedback.add('Not enough right backward turning detected. Pull more on the right wheel.');
-    } else {
-      feedback.add('Good right backward turning motion detected.');
-    }
-
-    // 2. WOBBLE DETECTION
-    if (wobble > 4.5) {
+    // 1. TURN DETECTION (Right Backward = POSITIVE Yaw)
+    if (avgYawRate <= 2.0) {
+      // Basically straight or drifting left
+      score -= 70;
+      feedback.add('No right turn detected. Make sure to pull the right wheel to steer.');
+    } else if (avgYawRate < 6.0) {
+      // Weak turn
       score -= 15;
-      feedback.add('Turn was uneven. Try smoother continuous pulls.');
+      feedback.add('Turn was a bit shallow. Try pulling harder on the inside (right) wheel.');
     } else {
-      feedback.add('Smooth turning motion.');
+      feedback.add('Excellent right turning arc!');
     }
 
-    // 3. TOO STRAIGHT PENALTY
-    if (avgAbsYawRate < 1.5) {
-      score -= 20;
-      feedback.add('Movement was mostly straight instead of turning.');
+    // 2. STRAIGHTNESS PENALTY (Double jeopardy for rolling straight)
+    if (avgAbsYawRate < 3.0) {
+      score -= 20; 
+      feedback.add('Movement was almost entirely straight.');
     }
 
-    // 4. TILT CHECK (Braking gently check)
-    if (maxPitch > 4.0) {
-      score -= 20;
+    // 3. WOBBLE DETECTION (Relaxed for human pushing)
+    if (wobble > 10.0) {
+      score -= 15;
+      feedback.add('Turn was a bit jerky. Try smoother, continuous pulls.');
+    }
+
+    // 4. TILT CHECK (Relaxed to allow for natural movement)
+    if (maxPitch > 6.0) {
+      score -= 15;
       feedback.add('Wheelchair tilted heavily. Remember to lean forward and brake gently to stop.');
     }
 

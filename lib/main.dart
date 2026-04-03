@@ -685,8 +685,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   final maneuver = maneuvers[index];
 
                   int level = 1; 
-                  if (index >= 5 && index <= 6) level = 2; 
-                  if (index >= 7) level = 3;
+                  if (index >= 5 && index <= 8) level = 2; 
+                  if (index >= 9) level = 3;
                   
                   bool isUnlocked = index == 0 || unlockAllLevels;
                   if (!isUnlocked && index > 0) {
@@ -1150,7 +1150,7 @@ class _SkillTreePainter extends CustomPainter {
     // Apply the custom flags to get the exact layout you want!
     drawLevelLine(10, 'BEGINNER', Colors.indigo.shade400, isRight: false, isBelow: false);
     drawLevelLine(5 * rowHeight, 'INTERMEDIATE', Colors.teal.shade500, isRight: true, isBelow: true);  
-    drawLevelLine(7 * rowHeight, 'ADVANCED', Colors.deepPurple.shade500, isRight: false, isBelow: false);
+    drawLevelLine(9 * rowHeight, 'ADVANCED', Colors.deepPurple.shade500, isRight: false, isBelow: false);
     
     final pathPaint = Paint()
       ..color = Colors.grey.shade300

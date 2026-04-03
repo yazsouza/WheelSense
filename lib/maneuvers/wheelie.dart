@@ -8,22 +8,27 @@ final wheelieManeuver = Maneuver(
     ManeuverStep(
       title: 'Set-up',
       text: 'Remove anti-tippers. Secure a spotter strap to the wheelchair axle bar or cross brace. Always have a spotter.',
+      imagePath: 'assets/images/wheelie1.png',
     ),
     ManeuverStep(
       title: 'Communicate',
       text: 'Wait until your spotter says "Ready" before every attempt. Disclose the risk of a rear tip.',
+      imagePath: 'assets/images/wheelie2.png',
     ),
     ManeuverStep(
       title: 'Getting into Wheelie',
       text: 'Hands starting at 11 o\'clock. Lean back and firmly push forward to pop up into the wheelie.',
+      imagePath: 'assets/images/wheelie3.png',
     ),
     ManeuverStep(
       title: 'Holding Wheelie',
       text: 'Find the balance point (hands between 12 and 1 o\'clock). Reactive Balance: If falling back, pull back. If falling forward, push forward. Relax your grip!',
+      imagePath: 'assets/images/wheelie4.png',
     ),
     ManeuverStep(
       title: 'Landing',
       text: 'Pull back gently on the rear wheels and lean forward to return upright. Try to land the casters softly.',
+      imagePath: 'assets/images/wheelie5.png',
     ),
   ],
   evaluator: (List<WheelData> pool) {

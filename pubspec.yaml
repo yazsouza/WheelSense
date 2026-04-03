@@ -30,6 +30,11 @@ flutter:
   uses-material-design: true
 
   assets:
+    - assets/images/wheelie1.png
+    - assets/images/wheelie2.png
+    - assets/images/wheelie3.png
+    - assets/images/wheelie4.png
+    - assets/images/wheelie5.png
     - assets/images/wheeling_forward.png
     - assets/images/wheeling_forward1.png    
     - assets/images/wheeling_forward2.png
@@ -52,8 +57,6 @@ flutter_icons:
 
 flutter_native_splash:
   color: "#f6fcfc"
-  image: assets/icons/splashlogo.png
   # This line tells Android 12+ to use the image properly:
   android_12:
-    image: assets/icons/splashlogo.png
     icon_background_color: "#f6fcfc"

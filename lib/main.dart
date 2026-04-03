@@ -76,7 +76,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   int testDurationSetting = 10;
 
   bool connected = false;
-  bool loading = true;
   WheelData wheelData = WheelData.empty();
   Timer? _pollTimer;
 
@@ -90,7 +89,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<WheelData> _sessionDataPool = [];
 
   Maneuver? selectedManeuver;
-  ExpansionTileController? _expandedTileController; // ACCORDION TRACKER
+  ExpansionTileController? _expandedTileController;
 
   final List<SessionResult> sessionHistory = [];
   HistoryTimeframe _selectedHistoryTimeframe = HistoryTimeframe.today;
@@ -220,7 +219,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (demoMode) {
       if (!mounted) return;
       setState(() {
-        loading = false;
         connected = true;
         wheelData = WheelData.empty();
         if (sessionRunning && !isCountingDown) {
@@ -236,7 +234,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       setState(() {
         wheelData = fresh;
         connected = true;
-        loading = false;
         if (sessionRunning && !isCountingDown) {
           _sessionDataPool.add(wheelData);
         }
@@ -245,7 +242,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (!mounted) return;
       setState(() {
         connected = false;
-        loading = false;
       });
     }
   }
@@ -541,42 +537,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // ==========================================
-  // CUSTOM SPLASH SCREEN LOGIC
-  // ==========================================
-  Widget _buildSplash() {
-    return Container(
-      color: const Color(0xFFF6F7FB),
-      alignment: Alignment.center,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Image.asset(
-            'assets/icons/splashlogo.png',
-            width: MediaQuery.of(context).size.width * 0.5,
-            fit: BoxFit.contain,
-            errorBuilder: (context, error, stackTrace) => const Icon(
-              Icons.wheelchair_pickup_rounded,
-              size: 150,
-              color: Colors.indigo,
-            ),
-          ),
-          const SizedBox(height: 60),
-          const CircularProgressIndicator(color: Colors.indigo),
-          const SizedBox(height: 20),
-          Text(
-            'Connecting to Wheelchair...',
-            style: TextStyle(
-              fontSize: 16, 
-              fontWeight: FontWeight.w600, 
-              color: Colors.indigo.shade300
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final pages = [
@@ -587,13 +547,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     ];
     
     return Scaffold(
-      appBar: loading ? null : AppBar(
+      appBar: AppBar(
         title: const Text('WheelSense', style: TextStyle(fontWeight: FontWeight.bold)),
         centerTitle: true,
         elevation: 0,
       ),
-      body: loading ? _buildSplash() : pages[_currentIndex],
-      bottomNavigationBar: loading ? null : NavigationBar(
+      body: pages[_currentIndex],
+      bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (v) => setState(() => _currentIndex = v),
         destinations: const [
@@ -1150,7 +1110,6 @@ class _SkillNode extends StatelessWidget {
     );
   }
 }
-
 
 class _SkillTreePainter extends CustomPainter {
   final int count;

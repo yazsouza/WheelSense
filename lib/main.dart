@@ -54,16 +54,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
   late Esp32Service esp;
 
   int _currentIndex = 0;
-
+  
   // --- USER PROFILE STATE ---
   String userName = "User";
   int selectedAvatarIndex = 0;
-  final List<String> avatarImages = ['🐶', '🐱', '🐼']; 
+  
+  // default.png is index 0. The settings menu will skip it and only show indices 1, 2, and 3.
+  final List<String> avatarImages = [
+    'assets/icons/default.png',
+    'assets/icons/toopie.png', 
+    'assets/icons/naila.png', 
+    'assets/icons/biscuit.png'
+  ];
   
   final TextEditingController _nameController = TextEditingController();
 
   bool demoMode = false;
-  bool unlockAllLevels = false; 
+  bool unlockAllLevels = false;
   String baseUrl = 'http://192.168.4.1';
   int pollingMs = 150; 
   int testDurationSetting = 10;
@@ -83,6 +90,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<WheelData> _sessionDataPool = [];
 
   Maneuver? selectedManeuver;
+  ExpansionTileController? _expandedTileController; // ACCORDION TRACKER
+
   final List<SessionResult> sessionHistory = [];
   HistoryTimeframe _selectedHistoryTimeframe = HistoryTimeframe.today;
 
@@ -166,8 +175,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Clear All History?', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-        content: const Text('Are you sure you want to permanently delete all your training data and scores? This cannot be undone.'),
+        title: const Text('Reset Account?', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+        content: const Text('Are you sure you want to permanently delete all your training data and reset your profile? This cannot be undone.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -176,14 +185,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () {
-              setState(() => sessionHistory.clear());
+              setState(() {
+                sessionHistory.clear();
+                userName = "User";
+                _nameController.clear();
+                selectedAvatarIndex = 0; 
+              });
+              
               _saveHistory();
+              _saveProfile();
+              
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('All training history cleared.')),
+                const SnackBar(content: Text('Account reset successfully.')),
               );
             },
-            child: const Text('Yes, Delete'),
+            child: const Text('Yes, Reset'),
           ),
         ],
       ),
@@ -216,7 +233,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       final fresh = await esp.fetchWheelData();
       if (!mounted) return;
-
       setState(() {
         wheelData = fresh;
         connected = true;
@@ -243,6 +259,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
     }
 
+    // Collapse the currently open accordion tile
+    _expandedTileController?.collapse();
+    _expandedTileController = null;
+
     setState(() {
       selectedManeuver = maneuver;
       isCountingDown = true;
@@ -251,7 +271,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       sessionRemaining = Duration(seconds: testDurationSetting);
       _sessionDataPool.clear();
     });
-
+    
     _countdownTimer?.cancel();
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       setState(() {
@@ -270,7 +290,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       sessionRunning = true;
       sessionRemaining = Duration(seconds: testDurationSetting);
     });
-
+    
     _sessionTimer?.cancel();
     _sessionTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return;
@@ -300,7 +320,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       } else {
         final evaluation = selectedManeuver!.evaluator(_sessionDataPool);
-
+        
         final result = SessionResult(
           name: selectedManeuver!.name,
           score: evaluation.score,
@@ -308,7 +328,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           duration: Duration(seconds: testDurationSetting),
           feedback: evaluation.feedback,
         );
-
+        
         sessionHistory.insert(0, result);
         _saveHistory();
         _showFeedbackDialog(result);
@@ -337,7 +357,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   List<SessionResult> _getFilteredHistory() {
     final now = DateTime.now();
-
     return sessionHistory.where((session) {
       final date = session.date;
       switch (_selectedHistoryTimeframe) {
@@ -378,7 +397,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final totalMinutes = d.inMinutes;
     final hours = totalMinutes ~/ 60;
     final minutes = totalMinutes % 60;
-
     if (hours > 0 && minutes > 0) return '${hours}h ${minutes}m';
     if (hours > 0) return '${hours}h';
     return '${minutes}m';
@@ -433,13 +451,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final file = File('${dir.path}/wheelchair_history_${timeframeLabel}_$timestamp.csv');
 
       await file.writeAsString(buffer.toString());
-
+      
       await Share.shareXFiles(
         [XFile(file.path)],
         text: 'WheelSense CSV export',
         subject: 'WheelSense CSV export',
       );
-
+      
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('CSV created on your phone. Use the share sheet to save or send it.')),
@@ -528,15 +546,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   // ==========================================
   Widget _buildSplash() {
     return Container(
-      color: const Color(0xFFF6F7FB), // Matches the app's clean background
+      color: const Color(0xFFF6F7FB),
       alignment: Alignment.center,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // The new logo is loaded here!
           Image.asset(
             'assets/icons/splashlogo.png',
-            width: MediaQuery.of(context).size.width * 0.5, // Perfect 50% scale
+            width: MediaQuery.of(context).size.width * 0.5,
             fit: BoxFit.contain,
             errorBuilder: (context, error, stackTrace) => const Icon(
               Icons.wheelchair_pickup_rounded,
@@ -568,7 +585,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _buildHistoryPage(),
       _buildSettingsPage(),
     ];
-
+    
     return Scaffold(
       appBar: loading ? null : AppBar(
         title: const Text('WheelSense', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -609,7 +626,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   CircleAvatar(
                     radius: 32,
                     backgroundColor: Colors.white,
-                    child: Text(avatarImages[selectedAvatarIndex], style: const TextStyle(fontSize: 36)),
+                    backgroundImage: AssetImage(avatarImages[selectedAvatarIndex]),
                   ),
                   const SizedBox(width: 20),
                   Expanded(
@@ -709,8 +726,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                   int level = 1; 
                   if (index >= 5 && index <= 6) level = 2; 
-                  if (index >= 7) level = 3; 
-
+                  if (index >= 7) level = 3;
+                  
                   bool isUnlocked = index == 0 || unlockAllLevels;
                   if (!isUnlocked && index > 0) {
                     final prevName = maneuvers[index - 1].name;
@@ -718,7 +735,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   }
 
                   bool hasPassed = sessionHistory.any((s) => s.name == maneuver.name && s.score >= 80);
-
                   double shiftX = 0;
                   if (index % 4 == 1) shiftX = -70;
                   if (index % 4 == 3) shiftX = 70;
@@ -744,6 +760,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               ),
                             );
                           }
+                        },
+                        onExpand: (controller) {
+                          if (_expandedTileController != null && _expandedTileController != controller) {
+                            _expandedTileController!.collapse();
+                          }
+                          _expandedTileController = controller;
                         },
                       ),
                     ),
@@ -807,7 +829,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final filteredHistory = _getFilteredHistory();
     final totalSessions = filteredHistory.length;
     final totalDuration = _getTotalHistoryDuration(filteredHistory);
-
+    
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -868,7 +890,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ),
                 ],
-              ),
+               ),
             ),
           ),
       ],
@@ -914,25 +936,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const SizedBox(height: 12),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: List.generate(avatarImages.length, (index) {
-                    bool isSelected = selectedAvatarIndex == index;
+                  children: List.generate(avatarImages.length - 1, (index) {
+                    int actualIndex = index + 1; // Start from index 1 to skip 'default.png'
+                    bool isSelected = selectedAvatarIndex == actualIndex;
                     return GestureDetector(
                       onTap: () {
-                        setState(() => selectedAvatarIndex = index);
+                        setState(() => selectedAvatarIndex = actualIndex);
                       },
                       child: Container(
-                        padding: const EdgeInsets.all(4),
+                        padding: const EdgeInsets.all(3),
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           border: Border.all(
                             color: isSelected ? Colors.indigo : Colors.transparent,
-                            width: 4,
+                            width: 3,
                           ),
                         ),
                         child: CircleAvatar(
-                          radius: 36,
+                          radius: 32,
                           backgroundColor: Colors.indigo.shade50,
-                          child: Text(avatarImages[index], style: const TextStyle(fontSize: 40)),
+                          backgroundImage: AssetImage(avatarImages[actualIndex]),
                         ),
                       ),
                     );
@@ -975,7 +998,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     const Text('Test Duration (seconds):', style: TextStyle(fontSize: 16)),
                     DropdownButton<int>(
                       value: testDurationSetting,
-                      items: [5, 10, 15, 20].map((int value) => DropdownMenuItem<int>(value: value, child: Text('$value s'))).toList(),
+                      items: [5, 10, 15, 20].map((int value) => 
+                        DropdownMenuItem<int>(value: value, child: Text('$value s'))).toList(),
                       onChanged: (newValue) {
                         if (newValue != null) {
                           setState(() => testDurationSetting = newValue);
@@ -991,7 +1015,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text('Unlock All Map Nodes', style: TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: const Text('Instantly overrides locks for presentation.'),
                   value: unlockAllLevels,
                   onChanged: (val) {
                     setState(() => unlockAllLevels = val);
@@ -1004,8 +1027,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   leading: const Icon(Icons.delete_forever, color: Colors.red),
-                  title: const Text('Clear Training History', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-                  subtitle: const Text('Permanently delete all scores and progression.'),
+                  title: const Text('Reset Account', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Permanently delete all scores, progression, and profile settings.'),
                   onTap: _confirmClearHistory,
                 ),
               ],
@@ -1045,7 +1068,7 @@ class _HistoryStatCard extends StatelessWidget {
   final String title;
   final String value;
   const _HistoryStatCard({required this.title, required this.value});
-
+  
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -1068,8 +1091,9 @@ class _SkillNode extends StatelessWidget {
   final Maneuver maneuver;
   final bool isUnlocked;
   final bool hasPassed;
-  final int level; 
+  final int level;
   final VoidCallback onTap;
+  final Function(ExpansionTileController)? onExpand;
 
   const _SkillNode({
     required this.maneuver,
@@ -1077,19 +1101,19 @@ class _SkillNode extends StatelessWidget {
     required this.hasPassed,
     required this.level,
     required this.onTap,
+    this.onExpand,
   });
-
+  
   @override
   Widget build(BuildContext context) {
     Color levelColor = Colors.indigo.shade400; 
-    if (level == 2) levelColor = Colors.teal.shade500; 
+    if (level == 2) levelColor = Colors.teal.shade500;
     if (level == 3) levelColor = Colors.deepPurple.shade500; 
 
     Color nodeColor = hasPassed ? Colors.amber.shade500 : (isUnlocked ? levelColor : Colors.grey.shade300);
     IconData icon = hasPassed ? Icons.star_rounded : (isUnlocked ? Icons.play_arrow_rounded : Icons.lock_rounded);
 
     BoxShape shape = BoxShape.circle;
-
     return GestureDetector(
       onTap: onTap,
       child: Column(
@@ -1127,10 +1151,11 @@ class _SkillNode extends StatelessWidget {
   }
 }
 
+
 class _SkillTreePainter extends CustomPainter {
   final int count;
   _SkillTreePainter({required this.count});
-
+  
   @override
   void paint(Canvas canvas, Size size) {
     final double rowHeight = 145.0;
@@ -1138,36 +1163,50 @@ class _SkillTreePainter extends CustomPainter {
 
     final linePaint = Paint()..color = Colors.grey.shade300..strokeWidth = 2;
     
-    void drawLevelLine(double y, String text, Color textColor) {
+    // We added 'isRight' and 'isBelow' flags so we can customize each line perfectly
+    void drawLevelLine(double y, String text, Color textColor, {bool isRight = false, bool isBelow = false}) {
       canvas.drawLine(Offset(0, y), Offset(size.width, y), linePaint);
+      
       final textSpan = TextSpan(
         text: text,
-        style: TextStyle(color: textColor.withOpacity(0.6), fontWeight: FontWeight.w900, letterSpacing: 3, fontSize: 14),
+        style: TextStyle(
+          color: textColor.withOpacity(0.6), 
+          fontWeight: FontWeight.w900, 
+          letterSpacing: 3, 
+          fontSize: 14
+        ),
       );
       final textPainter = TextPainter(text: textSpan, textDirection: TextDirection.ltr);
       textPainter.layout();
-      textPainter.paint(canvas, Offset(16, y - 10)); 
+      
+      // Calculate X: If isRight is true, push it to the right edge. Otherwise, lock it to the left.
+      double textX = isRight ? (size.width - textPainter.width - 16) : 16.0;
+      
+      // Calculate Y: If isBelow is true, draw it under the line. Otherwise, draw it above.
+      double textY = isBelow ? (y + 6) : (y - textPainter.height - 6);
+      
+      textPainter.paint(canvas, Offset(textX, textY)); 
     }
 
-    drawLevelLine(10, 'BEGINNER', Colors.indigo.shade400);           
-    drawLevelLine(5 * rowHeight, 'INTERMEDIATE', Colors.teal.shade500);  
-    drawLevelLine(7 * rowHeight, 'ADVANCED', Colors.deepPurple.shade500);
-
+    // Apply the custom flags to get the exact layout you want!
+    drawLevelLine(10, 'BEGINNER', Colors.indigo.shade400, isRight: false, isBelow: false);
+    drawLevelLine(5 * rowHeight, 'INTERMEDIATE', Colors.teal.shade500, isRight: true, isBelow: true);  
+    drawLevelLine(7 * rowHeight, 'ADVANCED', Colors.deepPurple.shade500, isRight: false, isBelow: false);
+    
     final pathPaint = Paint()
       ..color = Colors.grey.shade300
       ..strokeWidth = 12
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
-
+      
     Path path = Path();
     for (int i = 0; i < count; i++) {
       double shiftX = 0;
       if (i % 4 == 1) shiftX = -70;
       if (i % 4 == 3) shiftX = 70;
-
       double x = center + shiftX;
       double y = (i * rowHeight) + (rowHeight / 2) - 10;
-
+      
       if (i == 0) {
         path.moveTo(x, y);
       } else {
@@ -1176,7 +1215,7 @@ class _SkillTreePainter extends CustomPainter {
         if ((i - 1) % 4 == 3) prevShiftX = 70;
         double prevX = center + prevShiftX;
         double prevY = ((i - 1) * rowHeight) + (rowHeight / 2) - 10;
-
+        
         path.cubicTo(
           prevX, prevY + 65,
           x, y - 65,
@@ -1195,20 +1234,20 @@ class _ManeuverBottomSheet extends StatefulWidget {
   final Maneuver maneuver;
   final int testDurationSetting;
   final VoidCallback onStart;
-
+  
   const _ManeuverBottomSheet({
     required this.maneuver,
     required this.testDurationSetting,
     required this.onStart,
   });
-
+  
   @override
   State<_ManeuverBottomSheet> createState() => _ManeuverBottomSheetState();
 }
 
 class _ManeuverBottomSheetState extends State<_ManeuverBottomSheet> {
   int currentStepIndex = 0;
-
+  
   @override
   Widget build(BuildContext context) {
     if (currentStepIndex >= widget.maneuver.steps.length) {
@@ -1216,7 +1255,7 @@ class _ManeuverBottomSheetState extends State<_ManeuverBottomSheet> {
     }
     final step = widget.maneuver.steps[currentStepIndex];
     final isLastStep = currentStepIndex == widget.maneuver.steps.length - 1;
-
+    
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,

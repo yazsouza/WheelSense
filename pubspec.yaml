@@ -40,17 +40,20 @@ flutter:
     - assets/images/wheeling_on_spot.png
     - assets/icons/logo.png
     - assets/icons/splashlogo.png
-
+    - assets/icons/toopie.png
+    - assets/icons/naila.png
+    - assets/icons/biscuit.png
+    - assets/icons/default.png
 
 flutter_icons:
   android: true
   ios: true
-  image_path: assets/icons/logo.png
+  image_path: assets/icons/splashlogo.png
 
 flutter_native_splash:
-  color: "#F6F7FB"
-  image: assets/icons/logo.png
+  color: "#f6fcfc"
+  image: assets/icons/splashlogo.png
   # This line tells Android 12+ to use the image properly:
   android_12:
-    image: assets/icons/logo.png
-    icon_background_color: "#F6F7FB"
+    image: assets/icons/splashlogo.png
+    icon_background_color: "#f6fcfc"

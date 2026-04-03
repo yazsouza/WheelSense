@@ -1,6 +1,6 @@
 import 'esp32_service.dart';
 
-enum ManeuverType { forward, backward, turnLeft, turnRight, pivot, upRamp, downRamp }
+enum ManeuverType { forward, backward, turnLeft, turnRight, pivot, upRamp, downRamp, wheelie }
 
 class ManeuverStep {
   final String title;

@@ -8,14 +8,17 @@ final downRampManeuver = Maneuver(
     ManeuverStep(
       title: 'Setup',
       text: 'Lean back! Keep weight over the rear wheels to prevent forward tipping.',
+      imagePath: 'assets/images/rampdown1.png',
     ),
     ManeuverStep(
       title: 'Control Speed',
       text: 'Slide handrims smoothly through hands at 1 o\'clock. Speed of descent is controlled by how tightly you grip.',
+      imagePath: 'assets/images/rampdown2.png',
     ),
     ManeuverStep(
       title: 'Maintain Path',
-      text: 'Stay in the middle of the ramp. To stop or rest, grab one handrim to turn sideways.',
+      text: 'Stay in the middle of the ramp.',
+      imagePath: 'assets/images/rampdown2.png',
     ),
   ],
   evaluator: (List<WheelData> pool) {

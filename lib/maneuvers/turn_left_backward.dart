@@ -6,16 +6,19 @@ final turnLeftBackwardManeuver = Maneuver(
   type: ManeuverType.turnLeft, 
   steps: [
     ManeuverStep(
-      title: '01 - Backing up',
+      title: 'Backing up',
       text: 'Shoulder check to scan for obstacles in both directions. Pull back evenly and go slow.',
+      imagePath: 'assets/images/turningback1.png',
     ),
     ManeuverStep(
-      title: '02 - Turn',
+      title: 'Turn',
       text: 'Inside wheel (Left): Use to steer. Outside wheel (Right): Pull to keep moving.',
+      imagePath: 'assets/images/turningback2.png',
     ),
     ManeuverStep(
-      title: '03 - Stop',
+      title: 'Stop',
       text: 'Lean forward and brake gently.',
+      imagePath: 'assets/images/turningback3.png',
     ),
   ],
   evaluator: (List<WheelData> pool) {

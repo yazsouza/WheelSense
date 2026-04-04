@@ -10,7 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
+  url_launcher: ^6.2.5
   http: ^1.2.2
   intl: ^0.20.2
   path_provider: ^2.1.5
@@ -42,7 +42,20 @@ flutter:
     - assets/images/wheeling_backward1.png    
     - assets/images/wheeling_backward2.png
     - assets/images/wheeling_backward3.png
+    - assets/images/turningback1.png
+    - assets/images/turningback2.png
+    - assets/images/turningback3.png
+    - assets/images/turningback1R.png
+    - assets/images/turningback2R.png
+    - assets/images/turningback3R.png
+    - assets/images/rampup1.png
+    - assets/images/rampup2.png
+    - assets/images/rampup3.png
+    - assets/images/rampdown1.png
+    - assets/images/rampdown2.png
     - assets/images/wheeling_on_spot.png
+    - assets/images/forwardturn.png
+    - assets/images/forwardturn2.png
     - assets/icons/logo.png
     - assets/icons/splashlogo.png
     - assets/icons/toopie.png

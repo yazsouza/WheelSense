@@ -8,14 +8,17 @@ final upRampManeuver = Maneuver(
     ManeuverStep(
       title: 'Approach',
       text: 'Wheel toward the ramp with speed and momentum.',
+      imagePath: 'assets/images/rampup1.png',
     ),
     ManeuverStep(
       title: 'On Ramp',
       text: 'Lean forward! Use short, strong strokes (ARC stroke pattern) to keep hands close to the handrim and avoid rolling backward.',
+      imagePath: 'assets/images/rampup2.png',
     ),
     ManeuverStep(
       title: 'Stay Centred',
       text: 'Keep the wheelchair in the middle of the ramp. Maintain forward momentum until you clear the top.',
+      imagePath: 'assets/images/rampup3.png',
     ),
   ],
   evaluator: (List<WheelData> pool) {

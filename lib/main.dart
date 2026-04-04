@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-
+import 'package:url_launcher/url_launcher.dart';
 import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -76,7 +76,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   int testDurationSetting = 10;
 
   bool connected = false;
-  WheelData wheelData = WheelData.empty();
+  final ValueNotifier<WheelData> liveWheelData = ValueNotifier(WheelData.empty());
   Timer? _pollTimer;
 
   Timer? _sessionTimer;
@@ -97,14 +97,71 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final maneuvers = appManeuvers;
   final ScrollController _trainingScrollController = ScrollController();
 
-  @override
+@override
   void initState() {
     super.initState();
     esp = Esp32Service(baseUrl: baseUrl);
     _loadSavedData();
     _startPolling();
+
+    // ADDED: Trigger the safety pop-up right after the screen loads
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showSafetyDisclaimer();
+    });
   }
 
+  // ADDED: The Safety Disclaimer Dialog function
+  void _showSafetyDisclaimer() {
+    showDialog(
+      context: context,
+      barrierDismissible: false, // Forces the user to click the "I Agree" button to dismiss
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+            SizedBox(width: 8),
+            Text('Safety First', style: TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'WheelSense is designed to supplement - not replace - clinical demonstration and training.',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 12),
+              Text(
+                'Practicing wheelchair skills without prior training, in an unsafe environment, or without necessary safety equipment (such as a spotter strap) can result in serious injury. Do not attempt these skills without clinical support.',
+              ),
+              SizedBox(height: 12),
+              Text(
+                'By continuing, you acknowledge that you understand the risks associated with practicing wheelchair maneuvers and have consulted with a clinician.',
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: FilledButton.styleFrom(backgroundColor: Colors.indigo),
+            child: const Text('I Understand and Agree'),
+          ),
+        ],
+      ),
+    );
+  }
+// Helper function to open web links
+  Future<void> _launchURL(String urlString) async {
+    final Uri url = Uri.parse(urlString);
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not launch $urlString')),
+      );
+    }
+  }
   @override
   void dispose() {
     _pollTimer?.cancel();
@@ -112,6 +169,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _countdownTimer?.cancel();
     _trainingScrollController.dispose();
     _nameController.dispose();
+    liveWheelData.dispose(); //added to lower stress on main
     super.dispose();
   }
 
@@ -215,34 +273,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Future<void> _fetchData() async {
+Future<void> _fetchData() async {
     if (demoMode) {
       if (!mounted) return;
-      setState(() {
-        connected = true;
-        wheelData = WheelData.empty();
-        if (sessionRunning && !isCountingDown) {
-          _sessionDataPool.add(wheelData);
-        }
-      });
+      
+      // Only setState if connection status changed
+      if (!connected) setState(() => connected = true);
+      
+      liveWheelData.value = WheelData.empty();
+      
+      if (sessionRunning && !isCountingDown) {
+        _sessionDataPool.add(liveWheelData.value);
+      }
       return;
     }
 
     try {
       final fresh = await esp.fetchWheelData();
       if (!mounted) return;
-      setState(() {
-        wheelData = fresh;
-        connected = true;
-        if (sessionRunning && !isCountingDown) {
-          _sessionDataPool.add(wheelData);
-        }
-      });
+
+      // Only setState if connection status changed from false -> true
+      if (!connected) {
+        setState(() => connected = true);
+      }
+
+      // Update the UI silently without a full screen rebuild
+      liveWheelData.value = fresh;
+
+      if (sessionRunning && !isCountingDown) {
+        _sessionDataPool.add(fresh);
+      }
     } catch (_) {
       if (!mounted) return;
-      setState(() {
-        connected = false;
-      });
+      
+      // Only setState if connection status changed from true -> false
+      if (connected) {
+        setState(() => connected = false);
+      }
     }
   }
 
@@ -617,26 +684,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
             totalManeuvers: totalManeuvers,
           ),
           const SizedBox(height: 16),
-          Card(
+Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Live Sensor Data',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const Divider(),
-                  _DataRow(label: 'Speed', value: '${wheelData.speedMS.toStringAsFixed(2)} m/s'),
-                  _DataRow(label: 'Encoder Diff', value: wheelData.rpmDiff.toStringAsFixed(2)),
-                  _DataRow(label: 'Yaw Rate (Turn)', value: '${wheelData.yawRateDps.toStringAsFixed(2)} deg/s'),
-                  _DataRow(label: 'Pitch (Tilt)', value: '${wheelData.pitchDeg.toStringAsFixed(2)} deg'),
-                  _DataRow(label: 'Motion', value: wheelData.motion),
-                  _DataRow(label: 'IMU State', value: wheelData.imuMotionState),
-                  _DataRow(label: 'Right Wheel', value: wheelData.signedR.toStringAsFixed(2)),
-                  _DataRow(label: 'Left Wheel', value: wheelData.signedL.toStringAsFixed(2)),
-                ],
+              // ADDED: ValueListenableBuilder only redraws this specific column!
+              child: ValueListenableBuilder<WheelData>(
+                valueListenable: liveWheelData,
+                builder: (context, data, child) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Live Sensor Data',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      const Divider(),
+                      _DataRow(label: 'Speed', value: '${data.speedMS.toStringAsFixed(2)} m/s'),
+                      _DataRow(label: 'Encoder Diff', value: data.rpmDiff.toStringAsFixed(2)),
+                      _DataRow(label: 'Yaw Rate (Turn)', value: '${data.yawRateDps.toStringAsFixed(2)} deg/s'),
+                      _DataRow(label: 'Pitch (Tilt)', value: '${data.pitchDeg.toStringAsFixed(2)} deg'),
+                      _DataRow(label: 'Motion', value: data.motion),
+                      _DataRow(label: 'IMU State', value: data.imuMotionState),
+                      _DataRow(label: 'Right Wheel', value: data.signedR.toStringAsFixed(2)),
+                      _DataRow(label: 'Left Wheel', value: data.signedL.toStringAsFixed(2)),
+                    ],
+                  );
+                },
               ),
             ),
           ),
@@ -990,6 +1063,62 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   title: const Text('Reset Account', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
                   subtitle: const Text('Permanently delete all scores, progression, and profile settings.'),
                   onTap: _confirmClearHistory,
+                ),
+              ],
+            ),
+          ),
+        ),
+        // ADDED: Resources & Safety Card
+        const SizedBox(height: 16),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.medical_information, color: Colors.indigo),
+                    SizedBox(width: 8),
+                    Text('Resources & Safety', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const Divider(),
+                const SizedBox(height: 8),
+                
+                const Text('Clinical Supplement', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 4),
+                const Text(
+                  'This application is not meant to replace clinician demonstration of each skill. It is designed to supplement foundational training by acting as a reference before, during, or between skill practice attempts.',
+                  style: TextStyle(fontSize: 14),
+                ),
+                const SizedBox(height: 16),
+                
+                const Text('Liability Disclaimer', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 4),
+                const Text(
+                  'It is the responsibility of the clinician to explain the risks associated with practicing wheelchair skills and to obtain wheeler consent prior to attempting any new skills. Using this resource without prior training, a safe environment, or a spotter can result in serious injury.',
+                  style: TextStyle(fontSize: 14),
+                ),
+                const SizedBox(height: 16),
+                
+                const Text('Comprehensive Resources', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 4),
+                const Text(
+                  'For a comprehensive approach to the theory and practical application of wheelchair skills, please refer to the established clinical guidelines that power our evaluation metrics:',
+                  style: TextStyle(fontSize: 14),
+                ),
+                const SizedBox(height: 8),
+                
+                // Links to External Guidelines
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.link, color: Colors.blue),
+                  title: const Text('More Resources', style: TextStyle(color: Colors.blue, decoration: TextDecoration.underline)),
+                  onTap: () {
+                    // Note: To make this open a real browser window, you would add the 'url_launcher' package.
+                    _launchURL('https://linktr.ee/wheelchairresources');
+                  },
                 ),
               ],
             ),

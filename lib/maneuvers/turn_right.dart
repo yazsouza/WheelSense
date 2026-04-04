@@ -6,12 +6,19 @@ final turnRightManeuver = Maneuver(
   type: ManeuverType.turnRight,
   steps: [
     ManeuverStep(
-      title: 'Asymmetrical Push',
-      text: 'Push harder on the left wheel to initiate the turn.',
+      title: 'Approach',
+      text: 'Approach the turn with medium speed.',
+      imagePath: 'assets/images/forwardturn2.png',
     ),
+        ManeuverStep(
+      title: 'Timing and Push',
+      text: 'Axle of read wheel should line up with the where you are turning around. Push harder on the left wheel to initiate the turn.',
+      imagePath: 'assets/images/forwardturn2.png',
+   ),
     ManeuverStep(
       title: 'Follow Through',
       text: 'Maintain forward momentum while curving right.',
+      imagePath: 'assets/images/forwardturn2.png',
     ),
   ],
   evaluator: (List<WheelData> pool) {

@@ -21,23 +21,28 @@ final turnLeftBackwardManeuver = Maneuver(
       imagePath: 'assets/images/turningback3.png',
     ),
   ],
- evaluator: (List<WheelData> pool) {
+evaluator: (List<WheelData> pool) {
     if (pool.length < 5) return TestEvaluation(0, ['Not enough data collected. Try again.']);
 
     double score = 100.0;
     List<String> feedback = [];
 
+    double avgYawRate = pool.map((d) => d.yawRateDps).reduce((a, b) => a + b) / pool.length;
     double avgAbsYawRate = pool.map((d) => d.yawRateDps.abs()).reduce((a, b) => a + b) / pool.length;
+    double wobble = pool.map((d) => (d.yawRateDps - avgYawRate).abs()).reduce((a, b) => a + b) / pool.length;
     final maxPitch = pool.map((d) => d.pitchDeg.abs()).reduce((a, b) => a > b ? a : b);
 
-    // Calculate Total Rotation
-    double totalRotation = 0;
+    // Calculate Final vs Peak Rotation
+    double currentRotation = 0;
+    double peakRotation = 0;
     for (int i = 0; i < pool.length - 1; i++) {
       double diff = pool[i + 1].yawDeg - pool[i].yawDeg;
       if (diff > 180) diff -= 360;
       if (diff < -180) diff += 360;
-      totalRotation += diff;
+      currentRotation += diff;
+      if (currentRotation.abs() > peakRotation) peakRotation = currentRotation.abs();
     }
+    double finalRotation = currentRotation.abs();
 
     // 1. STRAIGHTNESS PENALTY (-70 pts)
     if (avgAbsYawRate < 1.5) {
@@ -45,21 +50,34 @@ final turnLeftBackwardManeuver = Maneuver(
       feedback.add('Movement was almost entirely straight.');
     }
 
-    // 2. 90-DEGREE CHECK (Left Backward = NEGATIVE Rotation)
-    if (totalRotation > -75) {
-      double deficit = 90 - totalRotation.abs();
-      if (totalRotation > -20) {
+    // 2. 90-DEGREE CHECK
+    if (finalRotation < 75) {
+      double deficit = 90 - finalRotation;
+      if (finalRotation < 20) {
         score -= 30;
         feedback.add('No distinct turn detected. Pull the inside (left) wheel harder.');
       } else {
         score -= (deficit * 0.8).clamp(0, 40);
-        feedback.add('Incomplete turn. You turned ${totalRotation.abs().round()}°. Aim for a full 90° turn.');
+        feedback.add('Incomplete turn. You turned ${finalRotation.round()}°. Aim for a full 90° turn.');
       }
     } else {
-      feedback.add('Excellent left turning arc (${totalRotation.abs().round()}°).');
+      feedback.add('Excellent left turning arc (${finalRotation.round()}°).');
     }
 
-    // 3. STRICT TILT CHECK (-20 pts)
+    // 3. OVERSHOOT / CORRECTION PENALTY
+    double overshoot = peakRotation - finalRotation;
+    if (overshoot > 10.0) {
+      score -= (overshoot * 1.0).clamp(0, 20);
+      feedback.add('You over-rotated and had to correct back. Try to stop smoothly exactly at 90°.');
+    }
+
+    // 4. RESTORED: WOBBLE DETECTION
+    if (wobble > 10.0) {
+      score -= 15;
+      feedback.add('Turn was a bit jerky. Try smoother, continuous pulls.');
+    }
+
+    // 5. STRICT TILT CHECK (-20 pts)
     if (maxPitch > 6.0) {
       score -= 20;
       feedback.add('Wheelchair tilted heavily. Remember to lean forward and brake gently to stop.');

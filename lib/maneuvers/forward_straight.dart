@@ -33,8 +33,6 @@ evaluator: (List<WheelData> pool) {
 
     final avgSpeed = pool.map((d) => d.speedMS).reduce((a, b) => a + b) / pool.length;
     final avgYawRate = pool.map((d) => d.yawRateDps).reduce((a, b) => a + b) / pool.length;
-    final maxYaw = pool.map((d) => d.yawRateDps).reduce((a, b) => a > b ? a : b);
-    final minYaw = pool.map((d) => d.yawRateDps).reduce((a, b) => a < b ? a : b);
     final maxPitch = pool.map((d) => d.pitchDeg.abs()).reduce((a, b) => a > b ? a : b);
 
     // 1. MINIMAL MOVEMENT (Auto-Score 0)
@@ -42,14 +40,20 @@ evaluator: (List<WheelData> pool) {
       return TestEvaluation(0, ['Minimal movement detected. Push harder to reach a measurable speed.']);
     }
 
-    // 2. DRIFT & S-SHAPE ANALYSIS
-    const double driftThreshold = 2.0;
-    final driftedLeft = maxYaw > driftThreshold;
-    final driftedRight = minYaw < -driftThreshold;
+    // 2. DRIFT & S-SHAPE ANALYSIS (Fixed Sensitivity)
+    int directionChanges = 0;
+    int? lastSign;
+    for (final d in pool) {
+      // 3.0 deg/s deadband ignores natural push wobble
+      int sign = (d.yawRateDps > 3.0) ? 1 : (d.yawRateDps < -3.0 ? -1 : 0);
+      if (sign == 0) continue;
+      if (lastSign != null && sign != lastSign) directionChanges++;
+      lastSign = sign;
+    }
 
-    if (driftedLeft && driftedRight) {
-      score -= 20; 
-      feedback.add('S-shape trajectory detected. Maintain a straight trajectory by pushing evenly.');
+    if (directionChanges >= 3) {
+      score -= (directionChanges * 5.0).clamp(0, 20);
+      feedback.add('S-shape trajectory detected. Maintain a straight path by pushing evenly.');
     } else if (avgYawRate > 1.5) {
       score -= (avgYawRate * 3.0).clamp(0, 20);
       feedback.add('You drifted left. Push more on the left wheel to straighten out.');

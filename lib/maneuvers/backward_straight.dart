@@ -9,7 +9,7 @@ final backwardStraightLine = Maneuver(
     ManeuverStep(title: 'Shoulder check', text: 'Scan for obstacles in both directions.', imagePath: 'assets/images/wheeling_backward2.png'),
     ManeuverStep(title: 'Pull rear wheels back evenly', text: 'Use short strokes and repeat.', imagePath: 'assets/images/wheeling_backward3.png'),
   ],
-  evaluator: (List<WheelData> pool) {
+ evaluator: (List<WheelData> pool) {
     if (pool.isEmpty) return TestEvaluation(0, ['No data recorded.']);
 
     double score = 100.0;
@@ -17,8 +17,6 @@ final backwardStraightLine = Maneuver(
 
     final avgSpeed = pool.map((d) => d.speedMS).reduce((a, b) => a + b) / pool.length;
     final avgYawRate = pool.map((d) => d.yawRateDps).reduce((a, b) => a + b) / pool.length;
-    final maxYaw = pool.map((d) => d.yawRateDps).reduce((a, b) => a > b ? a : b);
-    final minYaw = pool.map((d) => d.yawRateDps).reduce((a, b) => a < b ? a : b);
     final maxPitch = pool.map((d) => d.pitchDeg.abs()).reduce((a, b) => a > b ? a : b);
 
     // 1. MINIMAL MOVEMENT (Auto-Score 0)
@@ -26,13 +24,18 @@ final backwardStraightLine = Maneuver(
       return TestEvaluation(0, ['Minimal movement detected.']);
     }
 
-    // 2. DRIFT & S-SHAPE ANALYSIS
-    const double driftThreshold = 1.8;
-    final driftedLeft = maxYaw > driftThreshold;
-    final driftedRight = minYaw < -driftThreshold;
+    // 2. DRIFT & S-SHAPE ANALYSIS (Fixed Sensitivity)
+    int directionChanges = 0;
+    int? lastSign;
+    for (final d in pool) {
+      int sign = (d.yawRateDps > 3.0) ? 1 : (d.yawRateDps < -3.0 ? -1 : 0);
+      if (sign == 0) continue;
+      if (lastSign != null && sign != lastSign) directionChanges++;
+      lastSign = sign;
+    }
 
-    if (driftedLeft && driftedRight) {
-      score -= 24;
+    if (directionChanges >= 3) {
+      score -= (directionChanges * 5.0).clamp(0, 24);
       feedback.add('S-shape trajectory detected. Pull back evenly to maintain a straight line.');
     } else if (avgYawRate > 1.5) {
       score -= (avgYawRate * 3.0).clamp(0, 20);

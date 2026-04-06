@@ -9,7 +9,7 @@ final backwardStraightLine = Maneuver(
     ManeuverStep(title: 'Shoulder check', text: 'Scan for obstacles in both directions.', imagePath: 'assets/images/wheeling_backward2.png'),
     ManeuverStep(title: 'Pull rear wheels back evenly', text: 'Use short strokes and repeat.', imagePath: 'assets/images/wheeling_backward3.png'),
   ],
- evaluator: (List<WheelData> pool) {
+evaluator: (List<WheelData> pool) {
     if (pool.isEmpty) return TestEvaluation(0, ['No data recorded.']);
 
     double score = 100.0;
@@ -24,7 +24,7 @@ final backwardStraightLine = Maneuver(
       return TestEvaluation(0, ['Minimal movement detected.']);
     }
 
-    // 2. DRIFT & S-SHAPE ANALYSIS (Fixed Sensitivity)
+    // 2. DRIFT & S-SHAPE ANALYSIS (Fixed left/right physics)
     int directionChanges = 0;
     int? lastSign;
     for (final d in pool) {
@@ -38,11 +38,16 @@ final backwardStraightLine = Maneuver(
       score -= (directionChanges * 5.0).clamp(0, 24);
       feedback.add('S-shape trajectory detected. Pull back evenly to maintain a straight line.');
     } else if (avgYawRate > 1.5) {
+      // Positive Yaw = Nose left, Rear right. Reversing = drifting RIGHT.
       score -= (avgYawRate * 3.0).clamp(0, 20);
-      feedback.add('You drifted left while reversing. Pull more on the left wheel to straighten out.');
-    } else if (avgYawRate < -1.5) {
-      score -= (avgYawRate.abs() * 3.0).clamp(0, 20);
       feedback.add('You drifted right while reversing. Pull more on the right wheel to straighten out.');
+    } else if (avgYawRate < -1.5) {
+      // Negative Yaw = Nose right, Rear left. Reversing = drifting LEFT.
+      score -= (avgYawRate.abs() * 3.0).clamp(0, 20);
+      feedback.add('You drifted left while reversing. Pull more on the left wheel to straighten out.');
+    } else {
+      // Added positive reinforcement for a straight push!
+      feedback.add('Excellent backward directional control.');
     }
 
     // 3. ROLLING FORWARD (Sliding Penalty up to 50 pts)

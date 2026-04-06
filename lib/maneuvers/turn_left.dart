@@ -21,7 +21,7 @@ final turnLeftManeuver = Maneuver(
       imagePath: 'assets/images/forwardturn.png',
     ),
   ],
- evaluator: (List<WheelData> pool) {
+evaluator: (List<WheelData> pool) {
     if (pool.length < 5) return TestEvaluation(0, ['Not enough data collected. Try again.']);
 
     double score = 100.0;
@@ -32,7 +32,6 @@ final turnLeftManeuver = Maneuver(
     double wobble = pool.map((d) => (d.yawRateDps - avgYawRate).abs()).reduce((a, b) => a + b) / pool.length;
     final maxPitch = pool.map((d) => d.pitchDeg.abs()).reduce((a, b) => a > b ? a : b);
 
-    // Calculate Final vs Peak Rotation
     double currentRotation = 0;
     double peakRotation = 0;
     for (int i = 0; i < pool.length - 1; i++) {
@@ -44,13 +43,11 @@ final turnLeftManeuver = Maneuver(
     }
     double finalRotation = currentRotation.abs();
 
-    // 1. TOO STRAIGHT PENALTY (-70 pts)
     if (avgAbsYawRate < 1.5) {
       score -= 70;
       feedback.add('Movement was essentially a straight line instead of turning.');
     }
 
-    // 2. 90-DEGREE TURN CHECK (Left is Positive Rotation)
     if (finalRotation < 75) {
       double deficit = 90 - finalRotation;
       if (finalRotation < 20) {
@@ -66,20 +63,18 @@ final turnLeftManeuver = Maneuver(
       feedback.add('Good left turning arc (${finalRotation.round()}°).');
     }
 
-    // 3. OVERSHOOT / CORRECTION PENALTY
     double overshoot = peakRotation - finalRotation;
-    if (overshoot > 10.0) { // 10 degree grace window
+    if (overshoot > 10.0) { 
       score -= (overshoot * 1.0).clamp(0, 20);
       feedback.add('You over-rotated and had to correct back. Try to stop smoothly exactly at 90°.');
     }
 
-    // 4. RESTORED: WOBBLE DETECTION
-    if (wobble > 4.5) {
-      score -= 15;
-      feedback.add('Turn was uneven. Try smoother continuous pushes.');
+    // 4. RELAXED WOBBLE DETECTION
+    if (wobble > 8.0) { 
+      score -= 10;
+      feedback.add('Turn was a bit uneven. Try smoother continuous pushes.');
     }
 
-    // 5. TILT CHECK
     if (maxPitch > 4.0) {
       score -= 20;
       feedback.add('Wheelchair tilted during turn. Keep your weight forward for stability.');

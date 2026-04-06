@@ -16,40 +16,63 @@ final backwardStraightLine = Maneuver(
     final List<String> feedback = [];
 
     final avgSpeed = pool.map((d) => d.speedMS).reduce((a, b) => a + b) / pool.length;
-    final avgAbsYawRate = pool.map((d) => d.yawRateDps.abs()).reduce((a, b) => a + b) / pool.length;
-    
-    // FIX: PEAK TILT SENSITIVITY
+    final avgYawRate = pool.map((d) => d.yawRateDps).reduce((a, b) => a + b) / pool.length;
+    final maxYaw = pool.map((d) => d.yawRateDps).reduce((a, b) => a > b ? a : b);
+    final minYaw = pool.map((d) => d.yawRateDps).reduce((a, b) => a < b ? a : b);
     final maxPitch = pool.map((d) => d.pitchDeg.abs()).reduce((a, b) => a > b ? a : b);
 
-    if (avgSpeed < 0.05) return TestEvaluation(20, ['Minimal movement detected.']);
+    // 1. MINIMAL MOVEMENT (Auto-Score 0)
+    if (avgSpeed > -0.05 && avgSpeed < 0.05) {
+      return TestEvaluation(0, ['Minimal movement detected.']);
+    }
 
-    // 1. Drift analysis
+    // 2. DRIFT & S-SHAPE ANALYSIS
     const double driftThreshold = 1.8;
-    if (avgAbsYawRate > driftThreshold) {
-      score -= (avgAbsYawRate * 3.0);
-      feedback.add('You drifted while reversing. Pull more evenly.');
+    final driftedLeft = maxYaw > driftThreshold;
+    final driftedRight = minYaw < -driftThreshold;
+
+    if (driftedLeft && driftedRight) {
+      score -= 24;
+      feedback.add('S-shape trajectory detected. Pull back evenly to maintain a straight line.');
+    } else if (avgYawRate > 1.5) {
+      score -= (avgYawRate * 3.0).clamp(0, 20);
+      feedback.add('You drifted left while reversing. Pull more on the left wheel to straighten out.');
+    } else if (avgYawRate < -1.5) {
+      score -= (avgYawRate.abs() * 3.0).clamp(0, 20);
+      feedback.add('You drifted right while reversing. Pull more on the right wheel to straighten out.');
     }
 
-    // 2. Direction Changes (S-Shape)
-    int directionChanges = 0;
-    int? lastSign;
-    for (final d in pool) {
-      int sign = (d.yawRateDps > 2.0) ? 1 : (d.yawRateDps < -2.0 ? -1 : 0);
-      if (sign == 0) continue;
-      if (lastSign != null && sign != lastSign) directionChanges++;
-      lastSign = sign;
-    }
-    if (directionChanges >= 2) {
-      score -= (directionChanges * 8).clamp(0, 24);
-      feedback.add('You corrected side to side. Try to avoid an S-shaped path.');
+    // 3. ROLLING FORWARD (Sliding Penalty up to 50 pts)
+    const double deadbandRpm = 2.0;
+    final wrongWayCount = pool.where((d) => d.signedR > deadbandRpm || d.signedL > deadbandRpm).length;
+    if (wrongWayCount > 0) {
+      double wrongWayPct = wrongWayCount / pool.length;
+      score -= (wrongWayPct * 100).clamp(0, 50);
+      feedback.add('Detected rolling forward. Keep pulls consistent to move backward.');
     }
 
-    // 3. FIX: TILT SENSITIVITY
+    // 4. INCONSISTENT SPEED (Up to 15 pts)
+    final startIdx = (pool.length * 0.2).floor();
+    final endIdx = (pool.length * 0.8).floor();
+    if (endIdx > startIdx && endIdx <= pool.length) {
+      final midPool = pool.sublist(startIdx, endIdx);
+      final midAvgSpeed = midPool.map((d) => d.speedMS).reduce((a, b) => a + b) / midPool.length;
+      double totalDev = 0.0;
+      for (final d in midPool) { totalDev += (d.speedMS - midAvgSpeed).abs(); }
+      final avgDeviation = totalDev / midPool.length;
+      
+      if (avgDeviation > 0.08) {
+        score -= (avgDeviation * 80).clamp(0, 15);
+        feedback.add('Reversing speed varied. Try to keep your backward speed steadier.');
+      }
+    }
+
+    // 5. TILT SENSITIVITY
     if (maxPitch > 3.5) {
       score -= ((maxPitch - 3.0) * 7.0).clamp(0, 25);
       feedback.add('Wheelchair tilted back while reversing. Lean forward for stability.');
     } 
 
-    return TestEvaluation(score.clamp(0, 100).round(), feedback);
-  },
+    return TestEvaluation(score.clamp(0, 100).round(), feedback.take(3).toList());
+  }
 );

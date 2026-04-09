@@ -1,3 +1,3 @@
 # WheelSense: Manual Wheelchair Training and Feedback System
 
-[WheelSense Capstone Poster (2).pdf](https://github.com/user-attachments/files/26609722/WheelSense.Capstone.Poster.2.pdf)
+<img width="4608" height="3456" alt="WheelSense Capstone Poster (1)" src="https://github.com/user-attachments/assets/ac58e948-17ac-49d4-bf1a-4a4beacf7c30" />

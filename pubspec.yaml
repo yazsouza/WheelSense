@@ -10,23 +10,66 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  url_launcher: ^6.2.5
   http: ^1.2.2
   intl: ^0.20.2
+  path_provider: ^2.1.5
+  share_plus: ^10.1.2
+  cross_file: ^0.3.4+2
+  shared_preferences: ^2.5.5
+  flutter_native_splash: ^2.4.7
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
+
   assets:
+    - assets/images/wheelie1.png
+    - assets/images/wheelie2.png
+    - assets/images/wheelie3.png
+    - assets/images/wheelie4.png
+    - assets/images/wheelie5.png
     - assets/images/wheeling_forward.png
+    - assets/images/wheeling_forward1.png    
+    - assets/images/wheeling_forward2.png
+    - assets/images/wheeling_forward3.png
+    - assets/images/wheeling_backward1.png    
+    - assets/images/wheeling_backward2.png
+    - assets/images/wheeling_backward3.png
+    - assets/images/turningback1.png
+    - assets/images/turningback2.png
+    - assets/images/turningback3.png
+    - assets/images/turningback1R.png
+    - assets/images/turningback2R.png
+    - assets/images/turningback3R.png
+    - assets/images/rampup1.png
+    - assets/images/rampup2.png
+    - assets/images/rampup3.png
+    - assets/images/rampdown1.png
+    - assets/images/rampdown2.png
     - assets/images/wheeling_on_spot.png
-    - assets/icons/cat.png
+    - assets/images/forwardturn.png
+    - assets/images/forwardturn2.png
+    - assets/icons/logo.png
+    - assets/icons/splashlogo.png
+    - assets/icons/toopie.png
+    - assets/icons/naila.png
+    - assets/icons/biscuit.png
+    - assets/icons/default.png
 
 flutter_icons:
   android: true
   ios: true
-  image_path: assets/icons/cat.png
+  image_path: assets/icons/splashlogo.png
+
+flutter_native_splash:
+  color: "#f6fcfc"
+  # This line tells Android 12+ to use the image properly:
+  android_12:
+    icon_background_color: "#f6fcfc"

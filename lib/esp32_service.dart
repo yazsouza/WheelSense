@@ -1,102 +1,195 @@
-import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 import 'package:http/http.dart' as http;
 
-// Data models for the UI
-class ManeuverStep {
-  final String text;
-  final String? imagePath;
-  ManeuverStep({required this.text, this.imagePath});
-}
-
-class Maneuver {
-  final String name;
-  final List<ManeuverStep> steps;
-  final bool isPivot;
-  Maneuver({required this.name, required this.steps, this.isPivot = false});
-}
-
-class SessionResult {
-  final String name;
-  final int score;
-  final DateTime date;
-  SessionResult(this.name, this.score, this.date);
-}
-
 class WheelData {
-  final double rpmR, rpmL, speedMS, rpmDiff;
+  final double rpmR;
+  final double rpmL;
+  final double signedR;
+  final double signedL;
+  final double speedMS;
+  final double rpmDiff;
   final String motion;
-  final bool isSimulated;
+  final String dirR;
+  final String dirL;
+
+  final double pitchDeg;
+  final String slopeText;
+  final double yawRateDps;
+  final double yawDeg;
+  final String imuTurnDirection;
+  final String imuTurnState;
+  final String imuHeadingText;
+  final String imuMotionState;
 
   const WheelData({
-    required this.rpmR, required this.rpmL, required this.speedMS,
-    required this.rpmDiff, required this.motion, this.isSimulated = false,
+    required this.rpmR,
+    required this.rpmL,
+    required this.signedR,
+    required this.signedL,
+    required this.speedMS,
+    required this.rpmDiff,
+    required this.motion,
+    required this.dirR,
+    required this.dirL,
+    required this.pitchDeg,
+    required this.slopeText,
+    required this.yawRateDps,
+    required this.yawDeg,
+    required this.imuTurnDirection,
+    required this.imuTurnState,
+    required this.imuHeadingText,
+    required this.imuMotionState,
   });
 
-  // Bulletproof parser: handles strings, ints, or doubles from the ESP32
-  static double _parse(dynamic v) => double.tryParse(v.toString()) ?? 0.0;
+  static double _parseNum(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString()) ?? 0.0;
+  }
 
-  factory WheelData.fromJson(Map<String, dynamic> j) {
+  static String _parseStr(dynamic value, [String fallback = '']) {
+    if (value == null) return fallback;
+    final text = value.toString().trim();
+    return text.isEmpty ? fallback : text;
+  }
+
+  static double _signedFromDirection(double rpm, String direction) {
+    switch (direction.toLowerCase()) {
+      case 'forward':
+        return rpm;
+      case 'backward':
+        return -rpm;
+      default:
+        return 0.0;
+    }
+  }
+
+  factory WheelData.fromJson(Map<String, dynamic> json) {
+    final rpmR = _parseNum(json['rpmR']);
+    final rpmL = _parseNum(json['rpmL']);
+
+    final dirR = _parseStr(json['dirR'], 'Stopped');
+    final dirL = _parseStr(json['dirL'], 'Stopped');
+
+    final signedR = json.containsKey('signedR')
+        ? _parseNum(json['signedR'])
+        : _signedFromDirection(rpmR, dirR);
+
+    final signedL = json.containsKey('signedL')
+        ? _parseNum(json['signedL'])
+        : _signedFromDirection(rpmL, dirL);
+
     return WheelData(
-      rpmR: _parse(j['rpmR']),
-      rpmL: _parse(j['rpmL']),
-      speedMS: _parse(j['speed_m_s']),
-      rpmDiff: _parse(j['rpm_diff']),
-      motion: (j['motion'] ?? 'Stopped').toString(),
-      isSimulated: false,
+      rpmR: rpmR,
+      rpmL: rpmL,
+      signedR: signedR,
+      signedL: signedL,
+
+      // New Arduino keys
+      speedMS: json.containsKey('speed_m_s')
+          ? _parseNum(json['speed_m_s'])
+          : _parseNum(json['speed']),
+
+      rpmDiff: json.containsKey('rpm_diff')
+          ? _parseNum(json['rpm_diff'])
+          : _parseNum(json['diff']),
+
+      motion: json.containsKey('motion')
+          ? _parseStr(json['motion'], 'Stopped')
+          : _parseStr(json['turnState'], 'Stopped'),
+
+      dirR: dirR,
+      dirL: dirL,
+
+      pitchDeg: json.containsKey('pitch_deg')
+          ? _parseNum(json['pitch_deg'])
+          : _parseNum(json['pitchDeg']),
+
+      slopeText: json.containsKey('slope_text')
+          ? _parseStr(json['slope_text'], 'Level ground')
+          : _parseStr(json['slopeText'], 'Level ground'),
+
+      yawRateDps: json.containsKey('yaw_rate_dps')
+          ? _parseNum(json['yaw_rate_dps'])
+          : _parseNum(json['yawRate']),
+
+      yawDeg: json.containsKey('yaw_deg')
+          ? _parseNum(json['yaw_deg'])
+          : _parseNum(json['yawDeg']),
+
+      imuTurnDirection: json.containsKey('imu_turn_direction')
+          ? _parseStr(json['imu_turn_direction'], 'Straight')
+          : _parseStr(json['imuTurnDirection'], 'Straight'),
+
+      imuTurnState: json.containsKey('imu_turn_state')
+          ? _parseStr(json['imu_turn_state'], 'Not Turning')
+          : _parseStr(json['imuTurnState'], 'Not Turning'),
+
+      imuHeadingText: json.containsKey('imu_heading_text')
+          ? _parseStr(
+              json['imu_heading_text'],
+              'Centered / near start heading',
+            )
+          : _parseStr(
+              json['imuAngleText'],
+              'Centered / near start heading',
+            ),
+
+      imuMotionState: json.containsKey('imu_motion_state')
+          ? _parseStr(json['imu_motion_state'], 'No Turning Detected')
+          : _parseStr(json['imuState'], 'No Turning Detected'),
     );
   }
 
-  factory WheelData.mock({bool moving = false}) {
-    final r = Random();
-    double base = moving ? 20.0 : 0.0;
-    double l = base + (moving ? r.nextDouble() * 4 : 0);
-    double rr = base + (moving ? r.nextDouble() * 4 : 0);
-    return WheelData(
-      rpmL: l, rpmR: rr, speedMS: (l + rr) * 0.015,
-      rpmDiff: (l - rr).abs(), motion: moving ? "Moving" : "Stopped",
-      isSimulated: true,
+  factory WheelData.empty() {
+    return const WheelData(
+      rpmR: 0,
+      rpmL: 0,
+      signedR: 0,
+      signedL: 0,
+      speedMS: 0,
+      rpmDiff: 0,
+      motion: 'Stopped',
+      dirR: 'Stopped',
+      dirL: 'Stopped',
+      pitchDeg: 0,
+      slopeText: 'Level ground',
+      yawRateDps: 0,
+      yawDeg: 0,
+      imuTurnDirection: 'Straight',
+      imuTurnState: 'Not Turning',
+      imuHeadingText: 'Centered / near start heading',
+      imuMotionState: 'No Turning Detected',
     );
   }
 }
 
 class Esp32Service {
   final String baseUrl;
-  Esp32Service({this.baseUrl = 'http://192.168.4.1'});
 
-  final StreamController<WheelData> _controller = StreamController<WheelData>.broadcast();
-  Stream<WheelData> get stream => _controller.stream;
-  Timer? _timer;
+  const Esp32Service({required this.baseUrl});
 
-  void start() {
-    _timer?.cancel();
-    _timer = Timer.periodic(const Duration(milliseconds: 200), (_) => _poll());
-  }
+  Future<WheelData> fetchWheelData() async {
+    final response = await http
+        .get(
+          Uri.parse('$baseUrl/data'),
+          headers: const {
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+          },
+        )
+        .timeout(const Duration(seconds: 3));
 
-  Future<void> _poll() async {
-    try {
-      final res = await http.get(Uri.parse('$baseUrl/data')).timeout(const Duration(milliseconds: 800));
-      if (res.statusCode == 200) {
-        // DEBUG PRINT: This will show the raw data in your VS Code terminal
-        print("RAW DATA FROM ESP32: ${res.body}"); 
-        
-        _controller.add(WheelData.fromJson(jsonDecode(res.body)));
-      } else { 
-        _sendZeroData("Server Error ${res.statusCode}"); 
-      }
-    } catch (e) { 
-      _sendZeroData("Disconnected"); 
-      print("Connection Error: $e"); 
+    if (response.statusCode != 200) {
+      throw Exception('ESP32 returned status ${response.statusCode}');
     }
-  }
 
-  void _sendZeroData(String status) {
-    _controller.add(WheelData(
-      rpmL: 0.0, rpmR: 0.0, rpmDiff: 0.0, speedMS: 0.0, 
-      motion: status, isSimulated: false
-    ));
-  }
+    final decoded = jsonDecode(response.body);
 
-  void dispose() { _timer?.cancel(); _controller.close(); }
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('ESP32 response was not a JSON object');
+    }
+
+    return WheelData.fromJson(decoded);
+  }
 }
